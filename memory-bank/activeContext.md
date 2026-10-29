@@ -1,22 +1,49 @@
-# Active Context: WebLoad
+# Active Context: WebLoad (WIC)
 
 ## Current Focus
-- Aligning system architecture and implementation plans with the finalized WebLoad requirements.
-- Preparing core module loader implementation ([`src/index.js`](src/index.js:1)) and unified CLI executable.
+- Updated Memory Bank to reflect the revised, simplified, and focused architecture specified in [`architecture/requirements.md`](architecture/requirements.md).
+- Transitioning codebase planning to focus on Node.js synchronous import hooks, Bun plugin integration, atomic filesystem caching, and the `wic*` CLI suite.
+
+---
 
 ## Settled Decisions & Architectural Commitments
-- **Direct API Surface**: Standalone [`webLoad(url, options)`](src/index.js:1) API without AST parsing or code pre-transformation of caller modules.
-- **Server Loading Strategy**: Server runtimes (Node, Deno, Bun) write fetched modules to persistent file cache and load via `file://` dynamic [`import()`](src/index.js:1), eliminating `data:` URL length limitations.
-- **Browser & In-Memory Fallback**: Browsers use `blob:` URLs via [`URL.createObjectURL()`](src/adapters/browser.js:1). Node.js uncached fallback uses base64-encoded `data:` URLs.
-- **Strict Deprecation & Security Compliance**: Avoid deprecated [`module.register()`](src/adapters/node.js:1); no [`eval()`](src/index.js:1); no [`btoa()`](src/utils/encoding.js:1) (use [`Uint8Array.prototype.toBase64()`](src/utils/encoding.js:1) with UTF-8 safe fallback).
-- **Concurrency & Identity**: In-flight request deduplication and per-thread URL caching guaranteeing identical module namespace references.
-- **Unified CLI Architecture**: Single-file dispatcher powering `webload`, `bwebload`, `dwebload`, and `nwebload` with runtime overrides and `--clear` flag.
 
-## Active Next Steps
-1. Create project manifest [`package.json`](package.json) configured for multi-runtime ESM.
-2. Implement UTF-8 safe binary/base64 encoding utility ([`src/utils/encoding.js`](src/utils/encoding.js:1)).
-3. Implement URL canonicalizer and import map resolver ([`src/resolver.js`](src/resolver.js:1)).
-4. Implement concurrency & cache manager with in-flight deduplication and thread caching ([`src/cache.js`](src/cache.js:1)).
-5. Implement runtime loaders / adapters ([`src/adapters/`](src/adapters/)).
-6. Implement unified CLI script ([`bin/webload.js`](bin/webload.js:1)) with runtime aliases and `--clear` support.
-7. Build test suites across Node.js, Deno, Bun, and browser environments.
+1. **Target Runtime Focus**:
+   - Focus specifically on **Node.js** and **Bun** (where native URL imports are absent). Browsers and Deno natively support URL module imports with caching.
+
+2. **Core Operation Model**:
+   - 3-step pipeline: Cache lookup in `~/.cache/webload/` -> On miss: Fetch to temporary file, generate per-module [`package.json`](package.json) with `{"type": "module"}`, and atomic rename (`temp -> rename`) -> Load and execute verified cached file.
+
+3. **Node.js Synchronous Fetching**:
+   - Implements synchronous fetching referencing the `unjs/env-runner` pattern (e.g. [`worker_threads`](memory-bank/techContext.md) with [`Atomics.wait()`](memory-bank/techContext.md) / [`SharedArrayBuffer`](memory-bank/techContext.md)).
+   - Strictly avoids deprecated loader APIs ([`module.register()`](memory-bank/techContext.md)).
+
+4. **Bun Plugin**:
+   - Leverages [`Bun.plugin({ setup(build) { ... } })`](memory-bank/techContext.md) with `filter: /^https?:\/\//` to intercept static and dynamic imports.
+   - Preloaded via Bun's `-r` / `--preload` flag.
+
+5. **Filesystem Cache & Concurrency Safety**:
+   - Default cache root: `~/.cache/webload/`.
+   - Per-module / per-directory [`package.json`](package.json) creation without modifying a shared root [`package.json`](package.json), eliminating concurrency locks.
+   - URL path escaping preserving nested directory structures for relative imports (`./util.js`).
+
+6. **WICG Import Maps**:
+   - Full support for `"imports"` and `"scopes"` with 3-tier config discovery (`--import-map`, `./webload.json`, `~/webload.json`).
+
+7. **CLI Tools Suite**:
+   - [`wicbun`](bin/wicbun.js): Bun runner with preloaded plugin (executes local files or remote URL entrypoints).
+   - [`wicnode`](bin/wicnode.js): Node runner with synchronous import hooks (executes local files or remote URL entrypoints).
+   - [`wicutil`](bin/wicutil.js): Cache utility with `--clear`, `--list`, and `--remove <URL...>`.
+
+---
+
+## Next Steps
+
+1. Create project structure, package manifest ([`package.json`](package.json)), and configuration files.
+2. Implement filesystem cache manager (`src/cache.js`) with path sanitization, atomic renaming, and per-module `package.json` generation.
+3. Implement WICG Import Map resolver (`src/import-map.js`) with 3-tier discovery.
+4. Implement Node.js synchronous import hook system (`src/node/hook.js` & worker).
+5. Implement Bun plugin (`src/bun/plugin.js`).
+6. Implement CLI scripts: [`bin/wicnode.js`](bin/wicnode.js), [`bin/wicbun.js`](bin/wicbun.js), and [`bin/wicutil.js`](bin/wicutil.js).
+7. Create automated test suites verifying cache atomicity, Node.js and Bun URL imports, relative import resolution, and import maps.
+8. Author comprehensive user and technical documentation for CLI commands (`wicnode`, `wicbun`, `wicutil`), configuration, and cache internals.

@@ -1,89 +1,94 @@
-# WebLoad Requirements
+# WebLoad Project Requirements
 
-## Primary Requirements
+## 1. Background & Motivation
 
-- Provide a standardized http(s)-based import API
-- Support for browsers, Deno, and Node JS at a minimum
-- Support for Bun is highly desirable
-- Standard import maps (`<script type="importmap">` for browsers, `.json` file where applicable)
-- URL canonicalization (e.g. relative to absolute)
-- URL-based caching
-  - All imports of the same final URL within a thread return the same import object
-  - Optional file-based caching where available/appropriate
-- Prevent duplicate in-flight requests
-- `webrun`-style server-side CLI wrapper
-- Prefer implementations based on baseline platform capabilities where possible
-- No `eval()` (use `blob:` or `data:` import)
-- Avoid deprecated features (e.g. Node's `module.register()`)
-- As modern code, especially agentically-edited code, is prone to contain unicode UTF-16 code points, `btoa()` must be avoided
-- Clearly document any limitations
-  - E.g. platform does not support `blob:` URLs and has a maximum URL length limit for `data:` URLs that applies to uncached modules
+Modern web browsers and Deno natively support URL-based JavaScript module imports (`import "https://..."`) with transparent caching. Node.js and Bun do not natively support direct URL imports out of the box.
 
-## Nice To Have
+The goal of **WebLoad** (Web-Import-with-Cache / WIC) is to bring seamless URL module loading and caching to **Node.js** (via synchronous import hooks) and **Bun** (via a Bun plugin), backed by a shared, robust local filesystem cache.
 
-- Integrity
-  - Via import map extension (preferred for general usage)
-  - Via `webLoad` option (for testing, or if a specific version is a critical requirement)
+---
 
-## Non-Goals
+## 2. Core Architecture & Operation Model
 
-- Extensive legacy support
+Both Node.js and Bun loaders adhere to a unified module loading model:
 
-## Anticipated CLI Usage
+1. **Check Local Cache**: Look up the target URL module in the filesystem-based module cache (`~/.cache/webload/`).
+2. **On Cache Miss (Fetch & Atomic Write)**:
+   - Synchronously or asynchronously fetch the module from its source URL.
+   - Download the content to an isolated temporary file.
+   - Atomically rename the temporary file to its final destination upon complete, verified download.
+3. **Load Module**: Load and execute the module directly from the verified file in the local cache.
 
-```
-# pre-load module and execute script file or URL
-webload [-b|-d|-n] <file|URL>
-bwebload <file|URL>
-dwebload <file|URL>
-nwebload <file|URL>
+---
 
-# clear module cache
-webload --clear
-```
+## 3. Runtime Integration Specifications
 
-## Anticipated JavaScript Usage
+### 3.1 Node.js Synchronous Import Hooks
+- **Synchronous Fetching Model**:
+  - Implement synchronous module import resolution and fetching referencing the `unjs/env-runner` pattern (e.g. using `node:worker_threads` with `Atomics` / `SharedArrayBuffer`, synchronous subprocess fetching, or synchronous HTTP primitives).
+  - Guarantees synchronous imports in Node resolve reliably without blocking the main event loop or timing out.
+- **Deprecation Policy**:
+  - Explicitly avoid deprecated loader APIs (strictly avoid `module.register()`).
 
-```javascript
-const module = await webLoad(url, { ...options });
-const { ...identifiers } = await webLoad(url, { ... });
-```
+### 3.2 Bun Plugin Integration
+- **Plugin Hooking**:
+  - Implement a Bun plugin using `Bun.plugin({ setup(build) { ... } })` with URL pattern matchers (`filter: /^https?:\/\//`).
+  - Intercepts both static `import` and dynamic `import()` specifiers.
+  - Preloaded via Bun's `-r` / `--preload` flag to ensure zero configuration overhead for user scripts.
 
-Modules will explicitly access the `webLoad` API (no `import` pre-transformation or parsing required).
+---
 
-`webLoad` will manage URL canonicalization (likely needing the caller's import meta information as an option in some cases).
+## 4. Command-Line Tools & Utilities
 
-## `blob:` And `data:` Import Support Notes
+- **`wicbun`** (Web-Import-with-Cache for Bun):
+  - Automatically preloads the WebLoad Bun plugin.
+  - Supports executing local file paths or remote URL main entrypoints (e.g., `wicbun https://example.com/mod.js`).
+- **`wicnode`** (Web-Import-with-Cache for Node.js):
+  - Automatically preloads the WebLoad synchronous Node hooks.
+  - Supports executing local file paths or remote URL main entrypoints (e.g., `wicnode https://example.com/mod.js`).
+- **`wicutil`** (Cache Management CLI):
+  - `wicutil --clear`: Purges the entire local module cache.
+  - `wicutil --list`: Enumerates all currently cached modules by original URL and cached path.
+  - `wicutil --remove <URL...>`: Selectively evicts one or more modules from the cache by URL.
 
-### Compatibility Matrix
+---
 
-| Runtime / Platform | `blob:` URL dynamic [`import()`](architecture/requirements.md:29) | `data:` URL dynamic [`import()`](architecture/requirements.md:29) | Native [`Uint8Array.prototype.toBase64()`](architecture/requirements.md:29) | URL Length Limitations & Notes |
-| :--- | :--- | :--- | :--- | :--- |
-| **Chrome / Chromium** (Blink/V8) | Supported (v80+) | Supported (v80+) | Supported (v128+) | `data:` URLs: Bound by V8 string limit (~512 MB – 1 GB); high memory overhead. `blob:` URLs: Short UUID string (~50 chars), no URL length limit. |
-| **Firefox** (Gecko/SpiderMonkey) | Supported (v67+) | Supported (v67+) | Supported (v133+) | `data:` URLs: Bound by SpiderMonkey string length limit; base64 decoding overhead. `blob:` URLs: Short UUID string, no URL length limit. |
-| **Safari** (WebKit/JSC) | Supported (v13.1+) | Supported (v13.1+) | Supported (v18.2+) | `data:` URLs: Practical limit bounded by JSC string limits and memory. `blob:` URLs: Short UUID string, no URL length limit. |
-| **Deno** | Supported (v1.0+) | Supported (v1.0+) | Supported (v2.1+) | `data:` URLs: Supported up to V8 string memory limit. `blob:` URLs: Supported (`URL.createObjectURL` backed by memory store). |
-| **Bun** | Supported (v1.0+) | Supported (v1.0+) | Supported (v1.1.29+) | `data:` URLs: Supported up to JSC string memory limit. `blob:` URLs: Supported via internal blob registry. |
-| **Node.js** | **Unsupported** (`ERR_UNSUPPORTED_ESM_URL_SCHEME`) | Supported (v12.10+, v14.0+) | Supported (v22.0+, v23.0+) | `data:` URLs: Supported up to V8 max string length limit (~1 GB on 64-bit), but high memory overhead. `blob:` URLs: Default ESM loader only supports `file:`, `data:`, and `node:`. |
+## 5. Import Maps & Specifier Resolution
 
-### Key Findings & Implementation Strategy
+- **Standard Conformance**:
+  - Full compliance with the WICG Import Maps specification, supporting both top-level `"imports"` and contextual `"scopes"`.
+  - Resolves bare specifiers and prefix remappings before hitting the network or cache.
+- **Configuration Discovery & Precedence**:
+  1. Explicit CLI argument override (e.g., `--import-map <path>`)
+  2. Local directory configuration: `./webload.json`
+  3. User home configuration: `~/webload.json`
 
-1. **`blob:` URL Imports**:
-   - Universal across all major modern browsers (Chrome, Firefox, Safari), Deno, and Bun.
-   - **Node.js ESM loader explicitly forbids `blob:` URLs** (`ERR_UNSUPPORTED_ESM_URL_SCHEME`), requiring `data:` URLs or custom loaders/synthetic module handling for in-memory code loading.
-   - Preferred in browser environments due to constant, negligible URL string length (avoids string allocation and URL parsing bottlenecks for large modules).
+---
 
-2. **`data:` URL Imports**:
-   - Universally supported across all target platforms (Browsers, Bun, Deno, and Node.js).
-   - Module contents must be base64-encoded (`data:text/javascript;base64,...`) or percent-encoded (`data:text/javascript;charset=utf-8,...`).
-   - Requires relative specifiers inside the module code to be rewritten to absolute URLs before encoding, as relative imports from `data:` or `blob:` specifiers do not share a host base path.
+## 6. Filesystem Cache Structure & Concurrency
 
-3. **`Uint8Array.prototype.toBase64()`**:
-   - Standardized via TC39 Stage 4 ArrayBuffer base64 proposal.
-   - Available in modern runtimes (Chrome 128+, Firefox 133+, Safari 18.2+, Deno 2.1+, Node 22+, Bun 1.1.29+).
-   - In older environments (e.g. Node 18/20 LTS, older browsers), a fallback or polyfill (e.g. Node's [`Buffer.from().toString('base64')`](architecture/requirements.md:54) or UTF-8 [`TextEncoder`](architecture/requirements.md:54)-safe base64 table encoder) must be used. Note that [`btoa()`](architecture/requirements.md:13) cannot be used as it throws on non-Latin1/UTF-16 characters.
+- **Default Cache Root**: `~/.cache/webload/`
+- **Atomic Operations & Concurrency**:
+  - All writes must use temporary files renamed atomically upon completion (`temp -> rename`).
+  - Concurrent requests for the same URL must avoid colliding or reading partially written files.
+- **Per-Module Auxiliary Files**:
+  - Node.js requires an enclosing `package.json` with `{"type": "module"}` to parse `.js` files as ES Modules.
+  - Auxiliary `package.json` files must be generated on a **per-module or per-module-directory basis** inside the module's isolated cached directory alongside the downloaded file.
+  - **Shared root `package.json` modification is prohibited** to eliminate cross-process concurrency issues and avoid requiring network-filesystem locking protocols.
+- **URL Path Sanitization & Escaping**:
+  - Deterministically escape filesystem-reserved characters (`:`, `*`, `?`, `"`, `<`, `>`, `|`), query strings, and port numbers.
+  - Preserve relative directory hierarchies so that relative imports (e.g. `./util.js`) within remote modules resolve naturally on disk.
 
-4. **URL Length & Memory Constraints**:
-   - `data:` URLs embed the full module source, increasing string allocation and memory footprint by ~33% (for base64).
-   - While modern engines support large strings (~512 MB to 1 GB), large `data:` URLs cause performance penalties during compilation and parsing.
-   - `blob:` URLs avoid URL length constraints in browsers by referencing memory buffers via concise UUID strings.
+---
+
+## 7. See Also & References
+
+- [@node-loader/http](https://github.com/node-loader/node-loader-http)
+- [@node-loader/import-maps](https://github.com/node-loader/import-maps)
+- [RangerMauve webrun](https://github.com/RangerMauve/webrun)
+- [unjs/env-runner](https://github.com/unjs/env-runner)
+- [WICG Import Maps Specification](https://wicg.github.io/import-maps/)
+
+FEEDBACK:
+- Need to add requirements for test coverage
+- Need to add requirements for documentation

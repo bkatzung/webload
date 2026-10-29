@@ -1,32 +1,56 @@
-# Technical Context: WebLoad
+# Technical Context: WebLoad (WIC)
 
-## Runtime Compatibility Matrix
+## Runtime Compatibility & Integration Matrix
 
-| Runtime / Platform | `blob:` URL dynamic [`import()`](src/index.js:1) | `data:` URL dynamic [`import()`](src/index.js:1) | Native [`Uint8Array.prototype.toBase64()`](src/index.js:1) | Limitations & Strategy Notes |
+| Runtime | Hook / Plugin Integration Mechanism | Sync / Async Fetching Strategy | Auxiliary Metadata Requirements | Preload / Invocation Flag |
 | :--- | :--- | :--- | :--- | :--- |
-| **Chrome / Chromium** (Blink/V8) | Supported (v80+) | Supported (v80+) | Supported (v128+) | `blob:` URLs preferred (constant short UUID string). `data:` URLs bound by V8 string limit (~512MB-1GB). |
-| **Firefox** (Gecko/SpiderMonkey) | Supported (v67+) | Supported (v67+) | Supported (v133+) | `blob:` URLs preferred (no URL length limit). `data:` URLs bound by string limits and decoding overhead. |
-| **Safari** (WebKit/JSC) | Supported (v13.1+) | Supported (v13.1+) | Supported (v18.2+) | `blob:` URLs preferred. `data:` URLs bound by JSC string limits and memory. |
-| **Deno** | Supported (v1.0+) | Supported (v1.0+) | Supported (v2.1+) | Native URL dynamic import and `blob:` / `data:` supported (`URL.createObjectURL` backed by memory store). |
-| **Bun** | Supported (v1.0+) | Supported (v1.0+) | Supported (v1.1.29+) | Native URL dynamic import, `blob:` URLs (internal blob registry), and `data:` URLs supported. |
-| **Node.js** | **Unsupported** (`ERR_UNSUPPORTED_ESM_URL_SCHEME`) | Supported (v12.10+, v14.0+) | Supported (v22.0+, v23.0+) | Default ESM loader only supports `file:`, `data:`, and `node:`. File cache enables `file:` imports; uncached fallback uses base64 `data:` URLs. |
+| **Node.js** | Synchronous Import Hooks (referencing `unjs/env-runner` pattern) | Synchronous fetch via [`worker_threads`](memory-bank/techContext.md) + [`Atomics.wait()`](memory-bank/techContext.md) / [`SharedArrayBuffer`](memory-bank/techContext.md) or synchronous subprocess primitives | Per-module / per-directory [`package.json`](package.json) with `{"type": "module"}` | Executed via [`wicnode`](bin/wicnode.js) wrapper with preload flags |
+| **Bun** | Native Plugin API via [`Bun.plugin({ setup })`](memory-bank/techContext.md) with `filter: /^https?:\/\//` | Asynchronous/Synchronous fetch handled in `onLoad` hook | Directly loads ESM or transpiles via Bun's native loader | Executed via [`wicbun`](bin/wicbun.js) wrapper with `-r` / `--preload` |
 
-## Key Technical Decisions & Constraints
+---
 
-### 1. Module Loading Pipeline
-- **File Cache Loading**: In server environments (Node, Deno, Bun) with persistent file caching enabled, module sources are downloaded, cached locally, and imported directly via `file://` URLs. This eliminates `data:` URL memory overhead and length constraints.
-- **In-Memory Browser Loading**: In browsers, module sources are converted to object URLs via [`URL.createObjectURL(new Blob([...]))`](src/adapters/browser.js:1) and dynamically imported.
-- **Node.js In-Memory Fallback**: When persistent file caching is disabled in Node.js, modules are loaded as base64-encoded `data:` URLs (`data:text/javascript;base64,...`).
+## Technical Constraints & Design Principles
 
-### 2. Deprecation Policy
-- Avoid deprecated Node.js customization hooks ([`module.register()`](src/index.js:1)).
-- Strictly avoid [`eval()`](src/index.js:1) and non-standard execution tricks.
+### 1. Synchronous Import Execution in Node.js
+- In Node.js, static ESM import resolution and legacy synchronous hook boundaries require synchronous resolution.
+- `unjs/env-runner` demonstrates robust cross-version synchronous communication between a background worker and the main module resolver via [`SharedArrayBuffer`](memory-bank/techContext.md) and [`Atomics`](memory-bank/techContext.md) signaling.
+- Deprecated Node.js APIs (such as [`module.register()`](memory-bank/techContext.md)) are strictly avoided.
 
-### 3. Binary & Unicode Encoding
-- Modern code (especially agentically-edited or internationalized code) frequently contains Unicode UTF-16 code points.
-- [`btoa()`](src/index.js:1) throws on characters outside Latin1 (code points > 255) and is strictly avoided.
-- Standard TC39 [`Uint8Array.prototype.toBase64()`](src/utils/encoding.js:1) is used where supported natively, with a UTF-8 [`TextEncoder`](src/utils/encoding.js:1)-safe fallback for older runtimes.
+### 2. Bun Plugin System
+- Uses Bun's native build and plugin lifecycle hooks:
+  - `build.onResolve({ filter: /^https?:\/\// }, args => { ... })`
+  - `build.onLoad({ filter: /^https?:\/\// }, async args => { ... })`
+- Intercepts both static imports and dynamic `import()` calls at runtime.
 
-### 4. Import Map Support
-- Standard browser `<script type="importmap">` elements are parsed and used to canonicalize bare specifiers.
-- JSON-based import maps (`deno.json`, standard import map JSON files) are supported in server and CLI environments.
+### 3. Local Filesystem Cache Schema
+- **Cache Root**: `~/.cache/webload/` (resolved via `XDG_CACHE_HOME` or user home directory).
+- **Directory Layout Example**:
+  ```text
+  ~/.cache/webload/
+    esm.sh/
+      lodash-es@4.17.21/
+        package.json          <-- {"type": "module"}
+        lodash.js
+        chunk.js
+  ```
+- **Atomicity Protocol**:
+  1. Write incoming stream to `.tmp.<uuid>.<ext>`.
+  2. Ensure parent directory has an isolated [`package.json`](package.json) with `{"type": "module"}`.
+  3. Perform atomic filesystem rename to target path.
+- **Root `package.json` Prohibition**:
+  - The root cache directory must never contain or rewrite a shared [`package.json`](package.json), preventing race conditions across concurrent processes.
+
+### 4. Import Map Resolution
+- Follows the [WICG Import Maps Specification](https://wicg.github.io/import-maps/).
+- Supports top-level `"imports"` mapping and contextual `"scopes"` mapping.
+- Configuration resolution hierarchy:
+  1. CLI parameter: `--import-map <path>`
+  2. Local directory file: `./webload.json`
+  3. Home directory file: `~/webload.json`
+
+### 5. Key References
+- [`unjs/env-runner`](https://github.com/unjs/env-runner)
+- [`@node-loader/http`](https://github.com/node-loader/node-loader-http)
+- [`@node-loader/import-maps`](https://github.com/node-loader/import-maps)
+- [RangerMauve webrun](https://github.com/RangerMauve/webrun)
+- [WICG Import Maps Specification](https://wicg.github.io/import-maps/)

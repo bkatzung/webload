@@ -1,46 +1,58 @@
-# Product Context: WebLoad
+# Product Context: WebLoad (Web-Import-with-Cache / WIC)
 
 ## Problem Statement
-While the ECMAScript standard defines module syntax ([`import`](src/index.js:1) / [`export`](src/index.js:1)), host JavaScript environments implement network module loading with significant fragmentation:
-- **Browsers** support dynamic [`import()`](src/index.js:1) with HTTPS URLs and `blob:` / `data:` URLs natively, subject to CORS policies and MIME type validation (`text/javascript`).
-- **Deno** natively supports direct URL imports and `blob:` / `data:` dynamic [`import()`](src/index.js:1).
-- **Bun** natively supports URL imports, `data:` URLs, and `blob:` URLs via an internal blob registry.
-- **Node.js** historically lacks out-of-the-box HTTP(S) dynamic imports, explicitly rejects `blob:` URLs in dynamic [`import()`](src/index.js:1) (`ERR_UNSUPPORTED_ESM_URL_SCHEME`), and deprecated experimental customization hooks such as [`module.register()`](src/index.js:1). However, Node.js reliably supports `data:` URL dynamic [`import()`](src/index.js:1).
 
-This fragmentation creates hurdles for developers building universal libraries, serverless scripts, CLI utilities, micro-frontends, and dynamic runtime tools that need remote ES modules across environments.
+Modern JavaScript execution environments have diverged regarding URL-based ES module loading:
+- **Browsers** and **Deno** provide built-in, native support for direct URL imports (e.g. `import "https://..."`) and transparent caching.
+- **Node.js** and **Bun** do not natively support direct URL imports out of the box without manual pre-bundling or configuration.
+
+This gap creates friction for developers who want to write clean, portable, and dependency-free scripts that import directly from CDNs (e.g. `esm.sh`, `unpkg.com`) or remote endpoints in Node.js and Bun without full package manager install steps or build pipelines.
+
+---
 
 ## Target User Experience
 
-### 1. Direct, Zero-Transformation JavaScript API
-Modules explicitly invoke [`webLoad`](src/index.js:1) without requiring AST parsing or build-time code pre-transformation:
+### 1. Seamless URL Module Imports
+Developers can use standard static and dynamic import statements targeting HTTP/HTTPS URLs directly in their scripts:
 ```javascript
-const module = await webLoad(url, { ...options });
-const { ...identifiers } = await webLoad(url, { ...options });
+import { chunk } from "https://esm.sh/lodash-es";
+const { default: ms } = await import("https://esm.sh/ms");
 ```
-URL canonicalization is managed transparently (using caller import meta information where relative paths need resolution).
 
-### 2. Unified Server-Side CLI Tools
-Developers can execute local scripts or remote URLs across runtimes with pre-configured module loading and caching:
+### 2. Zero-Configuration Runtime CLIs
+WebLoad provides dedicated runtime CLI wrappers that preload the required hooks and execute local files or remote URL entrypoints directly:
+
 ```bash
-# Pre-load and execute script or URL using auto-detected or specific runtime
-webload [-b|-d|-n] <file|URL>
-bwebload <file|URL>  # Bun
-dwebload <file|URL>  # Deno
-nwebload <file|URL>  # Node.js
+# Execute local files or remote URLs with WebLoad in Bun
+wicbun ./app.js
+wicbun https://example.com/entry.js
 
-# Cache management
-webload --clear
+# Execute local files or remote URLs with WebLoad in Node.js
+wicnode ./app.js
+wicnode https://example.com/entry.js
 ```
 
-### 3. Native Import Map Support
-- Standard `<script type="importmap">` integration when running in browser environments.
-- JSON-based import map files (`.json`) when executing in CLI and server runtimes (e.g. `deno.json` / import map JSON configurations).
+### 3. Cache Management Utility (`wicutil`)
+A simple management CLI allows inspecting and maintaining the local filesystem cache (`~/.cache/webload/`):
 
-### 4. Deterministic Caching & Request Deduplication
-- **In-flight Deduplication**: Concurrent calls to the same URL share a single network request.
-- **Thread URL Caching**: Multiple imports of the same canonical URL within a thread always return the exact same module namespace instance.
-- **Persistent Cache**: Optional file-based caching on server platforms for offline support and faster startup.
+```bash
+# Purge the entire local module cache
+wicutil --clear
 
-### 5. Robust Encoding and Platform Transparency
-- Automatic handling of Unicode / UTF-16 code points in dynamically-loaded modules without [`btoa()`](src/index.js:1) failures.
-- Clear documentation of platform-specific constraints (e.g. Node.js `data:` URL string limits and lack of `blob:` support).
+# Enumerate all currently cached modules (original URL and local cache path)
+wicutil --list
+
+# Evict specific modules from the cache by URL
+wicutil --remove https://esm.sh/lodash-es https://esm.sh/ms
+```
+
+### 4. Standard WICG Import Maps
+Support standard Import Maps for bare specifier remapping and prefix aliasing (e.g. mapping `"lodash"` to `"https://esm.sh/lodash-es"`), discovered automatically or via CLI argument:
+1. `--import-map <path>` (CLI argument override)
+2. `./webload.json` (Local directory configuration)
+3. `~/webload.json` (User home configuration)
+
+### 5. Robust & Atomic Local Filesystem Caching
+- **Fast Startup & Offline Execution**: Once downloaded, cached modules are served directly from disk.
+- **Lock-Free Concurrency**: Atomic file operations (`temp -> rename`) and isolated per-module directory metadata eliminate race conditions and avoid global lock contention across concurrent processes.
+- **Relative Path Integrity**: Sub-resource imports within remote modules (e.g. `./utils.js`) resolve and cache naturally by preserving directory hierarchies.
