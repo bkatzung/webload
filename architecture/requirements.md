@@ -12,12 +12,16 @@ The goal of **WebLoad** (Web-Import-with-Cache / WIC) is to bring seamless URL m
 
 Both Node.js and Bun loaders adhere to a unified module loading model:
 
-1. **Check Local Cache**: Look up the target URL module in the filesystem-based module cache (`~/.cache/webload/`).
-2. **On Cache Miss (Fetch & Atomic Write)**:
+1. **Specifier Resolution**: Resolve bare specifiers and path remappings via WICG Import Maps (`imports` and `scopes`).
+2. **Security & Policy Check (Import-Time Enforcement)**:
+   - Validate the target URL against the active `webload.json` `"script-src"` allowlist policy.
+   - If the URL is not permitted (or if `"script-src"` is missing/empty), log a security warning/error to `console.error` with violation details and throw a standard `TypeError`. This check occurs at import time prior to cache lookup or disk execution, ensuring a module cached under a different configuration cannot bypass local security rules.
+3. **Check Local Cache**: Look up the validated URL module in the filesystem-based module cache (`~/.cache/webload/`).
+4. **On Cache Miss (Fetch & Atomic Write)**:
    - Synchronously or asynchronously fetch the module from its source URL.
    - Download the content to an isolated temporary file.
    - Atomically rename the temporary file to its final destination upon complete, verified download.
-3. **Load Module**: Load and execute the module directly from the verified file in the local cache.
+5. **Load Module**: Load and execute the module directly from the verified file in the local cache.
 
 ---
 
@@ -53,19 +57,37 @@ Both Node.js and Bun loaders adhere to a unified module loading model:
 
 ---
 
-## 5. Import Maps & Specifier Resolution
+## 5. Configuration & Import Maps
 
-- **Standard Conformance**:
-  - Full compliance with the WICG Import Maps specification, supporting both top-level `"imports"` and contextual `"scopes"`.
-  - Resolves bare specifiers and prefix remappings before hitting the network or cache.
 - **Configuration Discovery & Precedence**:
-  1. Explicit CLI argument override (e.g., `--import-map <path>`)
+  1. Explicit CLI argument override (e.g., `--config <path>`)
   2. Local directory configuration: `./webload.json`
   3. User home configuration: `~/webload.json`
+- **Import Maps Standard Conformance**:
+  - Full compliance with the WICG Import Maps specification, supporting both top-level `"imports"` and contextual `"scopes"`.
+  - Resolves bare specifiers and prefix remappings before security validation, cache lookup, or network access.
 
 ---
 
-## 6. Filesystem Cache Structure & Concurrency
+## 6. Security & CSP-like Script Source Allowlist (`script-src`)
+
+- **Configuration Key**:
+  - `webload.json` accepts a top-level `"script-src"` key containing an array of allowed source expressions (e.g., `["https:", "esm.sh", "*.esm.sh", "https://*.unpkg.com"]`).
+- **Default Deny Policy**:
+  - If `"script-src"` is missing, empty (`[]`), or `null`, the allowlist is empty by default.
+  - An empty allowlist denies all external URL imports; any attempt to import a remote URL module MUST log violation details to `console.error` and throw a `TypeError`.
+- **Import-Time Enforcement (Cache-Agnostic)**:
+  - Security validation is strictly enforced at **import resolution time**, prior to checking local cache or loading cached files.
+  - If a module was previously downloaded/cached under a more permissive configuration, importing it in a context with a restrictive `webload.json` that disallows its origin MUST fail and throw a `TypeError`.
+- **Source Expression Matching Rules**:
+  - **Schemes**: Scheme-only expressions (e.g., `"https:"`, `"http:"`) allow any resource matching that scheme.
+  - **Host / Origin Expressions**: Host definitions (e.g., `"esm.sh"`, `"https://esm.sh"`, `"http://localhost:3000"`) restrict allowed imports to matching origins/hosts (including port when specified).
+  - **Wildcard Subdomains**: Supports `*` wildcard subdomain expressions (e.g., `"*.esm.sh"`, `"https://*.unpkg.com"`), matching any subdomain (e.g., `cdn.esm.sh`, `sub.pkg.unpkg.com`).
+  - **Path / Prefix Matching**: Optional path prefix constraints if specified in the rule (e.g., `"https://esm.sh/v135/"`).
+
+---
+
+## 7. Filesystem Cache Structure & Concurrency
 
 - **Default Cache Root**: `~/.cache/webload/`
 - **Atomic Operations & Concurrency**:
@@ -81,7 +103,7 @@ Both Node.js and Bun loaders adhere to a unified module loading model:
 
 ---
 
-## 7. See Also & References
+## 8. See Also & References
 
 - [@node-loader/http](https://github.com/node-loader/node-loader-http)
 - [@node-loader/import-maps](https://github.com/node-loader/import-maps)

@@ -46,13 +46,18 @@ wicutil --list
 wicutil --remove https://esm.sh/lodash-es https://esm.sh/ms
 ```
 
-### 4. Standard WICG Import Maps
-Support standard Import Maps for bare specifier remapping and prefix aliasing (e.g. mapping `"lodash"` to `"https://esm.sh/lodash-es"`), discovered automatically or via CLI argument:
-1. `--import-map <path>` (CLI argument override)
+### 4. Standard WICG Import Maps & Security Policies
+Support standard Import Maps for bare specifier remapping and prefix aliasing along with CSP-like `"script-src"` security controls in `webload.json`:
+1. `--config <path>` (CLI argument override)
 2. `./webload.json` (Local directory configuration)
 3. `~/webload.json` (User home configuration)
 
-### 5. Robust & Atomic Local Filesystem Caching
+### 5. Configurable Security Allowlist (`script-src`)
+- **Default Deny by Default**: An empty or missing `"script-src"` configuration denies all remote module imports, preventing unauthorized script execution.
+- **Granular Origins & Wildcards**: Explicitly declare allowed schemes (`https:`), domains (`esm.sh`), or wildcards (`*.esm.sh`).
+- **Import-Time Enforcement**: Security checks evaluate on every import regardless of whether the target module is already present in the shared local filesystem cache.
+
+### 6. Robust & Atomic Local Filesystem Caching
 - **Fast Startup & Offline Execution**: Once downloaded, cached modules are served directly from disk.
 - **Lock-Free Concurrency**: Atomic file operations (`temp -> rename`) and isolated per-module directory metadata eliminate race conditions and avoid global lock contention across concurrent processes.
 - **Relative Path Integrity**: Sub-resource imports within remote modules (e.g. `./utils.js`) resolve and cache naturally by preserving directory hierarchies.
