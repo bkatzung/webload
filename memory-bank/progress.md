@@ -3,15 +3,23 @@
 ## Completed
 - [x] Defined core architecture and runtime requirements in [`architecture/requirements.md`](architecture/requirements.md).
 - [x] Defined CSP-like `"script-src"` security allowlist requirements and import-time enforcement model in [`architecture/requirements.md`](architecture/requirements.md).
-- [x] Updated Memory Bank files ([`memory-bank/systemPatterns.md`](memory-bank/systemPatterns.md), [`memory-bank/productContext.md`](memory-bank/productContext.md), [`memory-bank/activeContext.md`](memory-bank/activeContext.md)).
+- [x] Initialized [`package.json`](package.json) with ES module configuration, package exports, and executable CLI binaries.
+- [x] Implemented security validator ([`src/security.js`](src/security.js)) supporting CSP-like `"script-src"` directives, schemes, host/port rules, wildcard subdomains (`*.esm.sh`), path prefixes, default deny enforcement, and [`WebloadSecurityError`](src/security.js:5).
+- [x] Implemented WICG Import Maps resolver ([`src/import-map.js`](src/import-map.js)) supporting top-level `"imports"`, contextual `"scopes"`, and longest-prefix matching.
+- [x] Implemented configuration discovery and loader ([`src/config.js`](src/config.js)) with 3-tier discovery hierarchy (`--config`, `./webload.json`, `~/webload.json`).
+- [x] Implemented filesystem cache manager ([`src/cache.js`](src/cache.js)) with deterministic URL path sanitization, atomic writes (`temp -> rename`), isolated per-module [`package.json`](package.json) generation (`{"type": "module"}`), and cache management operations (`clearCache`, `listCache`, `removeCache`).
+- [x] Implemented Node.js synchronous fetch worker and client ([`src/node/sync-fetch-worker.js`](src/node/sync-fetch-worker.js), [`src/node/sync-fetch.js`](src/node/sync-fetch.js)) using [`worker_threads`](src/node/sync-fetch.js:7) with [`Atomics.wait()`](src/node/sync-fetch.js:51) and [`SharedArrayBuffer`](src/node/sync-fetch.js:41).
+- [x] Implemented Node.js module resolution hooks ([`src/node/hook.js`](src/node/hook.js)).
+- [x] Implemented Bun plugin integration ([`src/bun/plugin.js`](src/bun/plugin.js)) with URL and bare specifier interceptors.
+- [x] Implemented CLI tool binaries without file extensions: [`bin/wicnode`](bin/wicnode), [`bin/wicbun`](bin/wicbun), and [`bin/wicutil`](bin/wicutil), featuring [`process.execve`](bin/wicnode:124) process replacement with [`process.platform !== 'win32'`](bin/wicnode:124) checks and fallback to [`spawn()`](bin/wicnode:131).
+- [x] Authored automated test suites:
+  - [`test/security.test.js`](test/security.test.js)
+  - [`test/import-map.test.js`](test/import-map.test.js)
+  - [`test/cache.test.js`](test/cache.test.js)
+  - [`test/cli-wicnode.test.js`](test/cli-wicnode.test.js)
+  - [`test/cli-wicbun.test.js`](test/cli-wicbun.test.js)
+  - [`test/cli-wicutil.test.js`](test/cli-wicutil.test.js)
 
-## In Progress / Planned
-- [ ] Create project structure and package manifest ([`package.json`](package.json)).
-- [ ] Implement security policy validator (`src/security.js`) for `"script-src"` origin / wildcard / scheme matching.
-- [ ] Implement configuration loader (`src/config.js`) and WICG Import Map resolver (`src/import-map.js`).
-- [ ] Implement filesystem cache manager (`src/cache.js`) with atomic operations.
-- [ ] Implement Node.js synchronous import hooks (`src/node/hook.js` & worker).
-- [ ] Implement Bun plugin integration (`src/bun/plugin.js`).
-- [ ] Implement CLI runners and management utilities ([`bin/wicnode.js`](bin/wicnode.js), [`bin/wicbun.js`](bin/wicbun.js), [`bin/wicutil.js`](bin/wicutil.js)).
-- [ ] Implement test suites for security policy enforcement, cache atomicity, Node/Bun URL imports, and import maps.
-- [ ] Complete documentation for security controls, CLI commands, and configuration options.
+## Next Steps to Resume
+- [ ] Run full automated test suite (`npm test`).
+- [ ] Complete user and technical documentation (`README.md`, configuration and CLI reference).

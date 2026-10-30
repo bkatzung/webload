@@ -1,0 +1,36 @@
+{
+  "name": "webload",
+  "version": "0.1.0",
+  "description": "Seamless URL module loading and caching for Node.js and Bun with CSP-like security and WICG import maps",
+  "type": "module",
+  "main": "./src/index.js",
+  "bin": {
+    "wicnode": "./bin/wicnode",
+    "wicbun": "./bin/wicbun",
+    "wicutil": "./bin/wicutil"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./security": "./src/security.js",
+    "./config": "./src/config.js",
+    "./import-map": "./src/import-map.js",
+    "./cache": "./src/cache.js",
+    "./bun": "./src/bun/plugin.js",
+    "./node": "./src/node/hook.js"
+  },
+  "scripts": {
+    "test": "node --test test/**/*.test.js"
+  },
+  "keywords": [
+    "esm",
+    "url-imports",
+    "import-maps",
+    "cache",
+    "bun",
+    "node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

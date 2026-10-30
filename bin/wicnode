@@ -1,0 +1,146 @@
+#!/usr/bin/env node
+
+/**
+ * wicnode: Web-Import-with-Cache runner for Node.js
+ */
+
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resolveConfig } from '../src/config.js';
+import { validateScriptSrc } from '../src/security.js';
+import { isCached, getCachePath } from '../src/cache.js';
+import { fetchSync } from '../src/node/sync-fetch.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const hookPath = path.resolve(__dirname, '../src/node/hook.js');
+
+function printHelp () {
+	console.log(`
+WebLoad Node Runner (wicnode)
+
+Usage:
+  wicnode [options] <file-or-url> [script-args...]
+
+Options:
+  --config <path>    Specify path to webload.json configuration
+  -h, --help         Show this help message
+  -v, --version      Show version
+`);
+}
+
+async function main () {
+	const args = process.argv.slice(2);
+
+	if (args.length === 0 || args.includes('-h') || args.includes('--help')) {
+		printHelp();
+		process.exit(args.includes('-h') || args.includes('--help') ? 0 : 1);
+	}
+
+	if (args.includes('-v') || args.includes('--version')) {
+		console.log('webload 0.1.0');
+		process.exit(0);
+	}
+
+	let configPath = null;
+	const nodeArgs = [];
+	let entrypoint = null;
+	const scriptArgs = [];
+
+	let i = 0;
+	while (i < args.length) {
+		const arg = args[i];
+
+		if (arg === '--config') {
+			configPath = args[i + 1];
+			i += 2;
+		} else if (arg.startsWith('--config=')) {
+			configPath = arg.slice(9);
+			i += 1;
+		} else if (!entrypoint && !arg.startsWith('-')) {
+			entrypoint = arg;
+			i += 1;
+			// Everything after entrypoint is passed to the script
+			scriptArgs.push(...args.slice(i));
+			break;
+		} else {
+			if (!entrypoint) {
+				nodeArgs.push(arg);
+			} else {
+				scriptArgs.push(arg);
+			}
+			i += 1;
+		}
+	}
+
+	if (!entrypoint) {
+		console.error('Error: No entrypoint script or URL specified.');
+		printHelp();
+		process.exit(1);
+	}
+
+	const config = resolveConfig(configPath);
+	let targetFile = entrypoint;
+
+	// Check if entrypoint is a remote URL
+	if (/^https?:\/\//i.test(entrypoint)) {
+		try {
+			validateScriptSrc(entrypoint, config.scriptSrc);
+		} catch (err) {
+			console.error(err.message);
+			process.exit(1);
+		}
+
+		const cacheDir = config.cacheDir;
+		if (!isCached(entrypoint, cacheDir)) {
+			try {
+				const result = fetchSync(entrypoint, { cacheDir });
+				targetFile = result.filePath;
+			} catch (err) {
+				console.error(`[webload] Failed to load remote entrypoint: ${err.message}`);
+				process.exit(1);
+			}
+		} else {
+			targetFile = getCachePath(entrypoint, cacheDir);
+		}
+	}
+
+	const env = Object.assign({}, process.env);
+	if (configPath) {
+		env.WEBLOAD_CONFIG = path.resolve(process.cwd(), configPath);
+	}
+
+	const finalArgs = [
+		'--loader', hookPath,
+		'--no-warnings',
+		...nodeArgs,
+		targetFile,
+		...scriptArgs
+	];
+
+	// Use process.execve when available on non-Windows platforms for process replacement
+	if (process.platform !== 'win32' && typeof process.execve === 'function') {
+		const fullArgv = [process.execPath, ...finalArgs];
+		process.execve(process.execPath, fullArgv, env);
+		return;
+	}
+
+	const child = spawn(process.execPath, finalArgs, {
+		stdio: 'inherit',
+		env
+	});
+
+	child.on('exit', function (code, signal) {
+		if (signal) {
+			process.kill(process.pid, signal);
+		} else {
+			process.exit(code ?? 0);
+		}
+	});
+}
+
+main().catch(function (err) {
+	console.error('[webload] Unexpected error:', err);
+	process.exit(1);
+});
