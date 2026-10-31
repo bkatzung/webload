@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    /* Environment & Language Support */
+    "target": "ES2022",                          // Modern syntax support
+    "module": "NodeNext",                        // Handles modern ESM imports
+    "moduleResolution": "NodeNext",              // Uses Node.js modern resolution rules
+    "lib": ["ES2022"],                           // Includes Node-compatible core APIs (no DOM)
+    "allowJs": true,
+    "checkJs": false,
+
+    /* Interoperability & Types */
+    "types": ["node"],                           // Explicitly loads @types/node definitions
+    "esModuleInterop": true,                     // Fixes CommonJS/ESM module compatibility
+    "forceConsistentCasingInFileNames": true,    // Prevents case-sensitive file path issues
+
+    /* Strictness & Safety */
+    "strict": true,                              // Enables strict type-checking rules
+    "skipLibCheck": true                         // Speeds up compilation by ignoring .d.ts check errors
+  },
+  "include": ["src/**/*", "bin/*"],              // Adjust to match your source directory
+  "exclude": ["node_modules"]
+}

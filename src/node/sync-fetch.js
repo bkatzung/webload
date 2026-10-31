@@ -29,7 +29,7 @@ function getWorker () {
 }
 
 /**
- * Synchronously fetches a URL over HTTP/HTTPS.
+ * Synchronously fetches and caches a URL over HTTP/HTTPS.
  * @param {string | URL} targetUrl
  * @param {Object} [options]
  * @param {number} [options.timeout=30000]

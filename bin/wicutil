@@ -7,6 +7,8 @@
 import { resolveConfig } from '../src/config.js';
 import { clearCache, listCache, removeCache } from '../src/cache.js';
 
+const VERSION = '0.1.0';
+
 function printHelp () {
 	console.log(`
 WebLoad Cache Management Utility (wicutil)
@@ -37,14 +39,15 @@ function formatBytes (bytes) {
 
 async function main () {
 	const args = process.argv.slice(2);
+	const help = args.includes('-h') || args.includes('--help');
 
-	if (args.length === 0 || args.includes('-h') || args.includes('--help')) {
+	if (args.length === 0 || help) {
 		printHelp();
-		process.exit(args.includes('-h') || args.includes('--help') ? 0 : 1);
+		process.exit(help ? 0 : 1);
 	}
 
 	if (args.includes('-v') || args.includes('--version')) {
-		console.log('wicutil 0.1.0');
+		console.log(`wicutil ${VERSION}`);
 		process.exit(0);
 	}
 

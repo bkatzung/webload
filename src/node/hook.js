@@ -2,13 +2,11 @@
  * WebLoad Node.js Module Hooks (resolve & load)
  */
 
-import { pathToFileURL, fileURLToPath } from 'node:url';
-import path from 'node:path';
 import fs from 'node:fs';
 import { resolveConfig } from '../config.js';
 import { resolveImportMap } from '../import-map.js';
 import { validateScriptSrc } from '../security.js';
-import { isCached, getCachePath } from '../cache.js';
+import { isCached, getCachePath, readFromCacheSync } from '../cache.js';
 import { fetchSync } from './sync-fetch.js';
 
 let activeConfig = null;
@@ -36,95 +34,93 @@ export function setConfig (cfg) {
 /**
  * Node.js ESM resolve hook.
  * Intercepts HTTP/HTTPS URLs and import-map mapped specifiers.
+ * Resolves relative file paths to absolute URLs when parent URL is http(s).
  * @param {string} specifier
  * @param {Object} context
  * @param {Function} nextResolve
  * @returns {Promise<Object>}
  */
-export async function resolve (specifier, context, nextResolve) {
+export function resolve (specifier, context, nextResolve) {
 	const config = getConfig();
-	const parentURL = context.parentURL || null;
+	const parentURL = context?.parentURL || null;
 
 	let target = specifier;
+	const webEntry = !parentURL && target.match(/^(file:\/\/.*?\/)(https?:)(\/.*)/i);
 
-	// 1. Resolve via import map
+	if (webEntry) {
+		// De-file file:-ized http(s) entry-point
+		target = webEntry[2] + '/' + webEntry[3];
+	}
+
 	const importMap = {
 		imports: config.imports || {},
 		scopes: config.scopes || {}
 	};
 
-	const remapped = resolveImportMap(specifier, parentURL, importMap, config.configBaseUrl);
+	const remapped = resolveImportMap(target, parentURL, importMap, config.configBaseUrl);
+
 	if (remapped) {
 		target = remapped;
 	}
 
 	// 2. Check if target is a remote HTTP/HTTPS URL
 	if (/^https?:\/\//i.test(target)) {
-		// Import-time security check (cache-agnostic)
-		validateScriptSrc(target, config.scriptSrc);
-
-		const cacheDir = config.cacheDir;
-		let localPath = getCachePath(target, cacheDir);
-
-		if (!isCached(target, cacheDir)) {
-			const fetchResult = fetchSync(target, { cacheDir });
-			localPath = fetchResult.filePath;
-		}
-
 		return {
-			url: pathToFileURL(localPath).href,
-			format: 'module',
+			url: target,
 			shortCircuit: true
 		};
 	}
 
-	// 3. Handle relative imports from inside a cached remote module
-	if (parentURL && parentURL.startsWith('file://')) {
-		// Check if parent is inside the cacheDir and corresponds to a remote module
-		const parentPath = fileURLToPath(parentURL);
-		const cacheDir = config.cacheDir;
-
-		if (parentPath.startsWith(cacheDir) && (target.startsWith('./') || target.startsWith('../'))) {
-			// Resolve relative path on disk
-			const resolvedPath = path.resolve(path.dirname(parentPath), target);
-			if (fs.existsSync(resolvedPath)) {
-				return {
-					url: pathToFileURL(resolvedPath).href,
-					format: 'module',
-					shortCircuit: true
-				};
-			}
-
-			// If file with .js extension exists
-			if (fs.existsSync(`${resolvedPath}.js`)) {
-				return {
-					url: pathToFileURL(`${resolvedPath}.js`).href,
-					format: 'module',
-					shortCircuit: true
-				};
-			}
-
-			// If index.js exists
-			if (fs.existsSync(path.join(resolvedPath, 'index.js'))) {
-				return {
-					url: pathToFileURL(path.join(resolvedPath, 'index.js')).href,
-					format: 'module',
-					shortCircuit: true
-				};
-			}
+	// 3. Resolve relative file paths to absolute URLs when parent URL is http(s)
+	if (parentURL && /^https?:\/\//i.test(parentURL)) {
+		if (target.startsWith('./') || target.startsWith('../') || target.startsWith('/')) {
+			const resolvedUrl = new URL(target, parentURL).href;
+			return {
+				url: resolvedUrl,
+				shortCircuit: true
+			};
 		}
 	}
 
-	return nextResolve(target, context);
+	return nextResolve(specifier, context);
 }
 
 /**
  * Node.js ESM load hook.
+ * Handles security check, cache lookup/fetching, and returns module source.
  * @param {string} url
  * @param {Object} context
  * @param {Function} nextLoad
  * @returns {Promise<Object>}
  */
-export async function load (url, context, nextLoad) {
+export function load (url, context, nextLoad) {
+	if (/^https?:\/\//i.test(url)) {
+		const config = getConfig();
+
+		// 1. Check allowed URL (security check)
+		validateScriptSrc(url, config.scriptSrc);
+
+		// 2. Handle cache misses
+		const cacheDir = config.cacheDir;
+		let content;
+
+		if (isCached(url, cacheDir)) {
+			const cached = readFromCacheSync(url, cacheDir);
+
+			content = cached?.code;
+		} else {
+			const fetchResult = fetchSync(url, { cacheDir });
+
+			content = fetchResult.content;
+		}
+
+		// 3. Return cache file contents
+		return {
+			format: 'module',
+			source: content,
+			shortCircuit: true
+		};
+	}
+
 	return nextLoad(url, context);
 }

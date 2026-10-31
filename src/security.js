@@ -99,7 +99,7 @@ export function parseSourceExpression (expr) {
 
 	// Extract port if present
 	let port = null;
-	const portMatch = hostPart.match(/^(.*):(\d+)$/);
+	const portMatch = hostPart.match(/^(.*):(\d+|\*)$/);
 	if (portMatch) {
 		hostPart = portMatch[1];
 		port = portMatch[2];
@@ -162,7 +162,7 @@ export function matchSourceExpression (targetUrl, sourceRule) {
 	}
 
 	// 2. Check port
-	if (rule.port !== null) {
+	if (rule.port !== null && rule.port !== '*') {
 		const urlPort = urlObj.port || (urlObj.protocol === 'https:' ? '443' : urlObj.protocol === 'http:' ? '80' : '');
 		const rulePort = rule.port;
 		if (urlPort !== rulePort) {

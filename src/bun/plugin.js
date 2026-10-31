@@ -59,12 +59,14 @@ export function registerWebloadBunPlugin (customConfig = null) {
 				// 1. Resolve via import map if applicable
 				const remapped = resolveImportMap(specifier, importer, importMap, config.configBaseUrl);
 				const targetUrl = remapped || specifier;
+				console.log('target', targetURL);
 
 				// 2. Validate against script-src allowlist
 				validateScriptSrc(targetUrl, config.scriptSrc);
 
 				const cacheDir = config.cacheDir;
 				let localPath = getCachePath(targetUrl, cacheDir);
+				console.log('local', localPath);
 
 				// 3. Cache lookup & fetch on miss
 				if (!isCached(targetUrl, cacheDir)) {
