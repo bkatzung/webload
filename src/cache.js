@@ -163,7 +163,7 @@ export function writeToCacheSync (targetUrl, content, metaOptions = {}, cacheDir
 	fs.mkdirSync(targetDir, { recursive: true });
 
 	// Ensure per-directory package.json with {"type": "module"}
-	ensureModulePackageJsonSync(targetDir);
+	// ensureModulePackageJsonSync(targetDir);
 
 	// Atomic write using unique temporary file
 	const tempFilename = `.tmp.${crypto.randomUUID()}${path.extname(finalPath)}`;
