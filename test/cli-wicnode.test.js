@@ -15,6 +15,7 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 	let serverWorker;
 	let serverPort;
 	let testTmpDir;
+	let testConfigPath;
 
 	before(async function () {
 		testTmpDir = path.join(os.tmpdir(), `webload-test-node-${Date.now()}`);
@@ -26,26 +27,19 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 				import { parentPort } from 'node:worker_threads';
 
 				const server = http.createServer((req, res) => {
-					if (req.url === '/module.js') {
+					if (req.url === '/hello.js') {
 						res.writeHead(200, { 'Content-Type': 'application/javascript' });
 						res.end(\`
-							import { sub } from './sub.js';
-							export function greet (name) {
-								return 'Hello ' + name + ' from ' + sub();
+							console.log('HELLO_MODULE_EXECUTED');
+							export function hello (name = 'world') {
+								return 'Hello, ' + name + '!';
 							}
 						\`);
-					} else if (req.url === '/sub.js') {
+					} else if (req.url === '/dot_hello.js') {
 						res.writeHead(200, { 'Content-Type': 'application/javascript' });
 						res.end(\`
-							export function sub () {
-								return 'submodule';
-							}
-						\`);
-					} else if (req.url === '/entrypoint.js') {
-						res.writeHead(200, { 'Content-Type': 'application/javascript' });
-						res.end(\`
-							import { sub } from './sub.js';
-							console.log('ENTRYPOINT_EXECUTED_SUCCESSFULLY_' + sub());
+							import { hello } from './hello.js';
+							console.log('DOT_HELLO_SUCCESS: ' + hello('relative'));
 						\`);
 					} else {
 						res.writeHead(404);
@@ -64,6 +58,17 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 			});
 			serverWorker.on('error', reject);
 		});
+
+		testConfigPath = path.join(testTmpDir, 'webload.json');
+		fs.writeFileSync(
+			testConfigPath,
+			JSON.stringify({
+				imports: {
+					'@hello': `http://127.0.0.1:${serverPort}/hello.js`
+				},
+				'script-src': ['http://127.0.0.1:*', 'http://localhost:*']
+			}, null, '\t')
+		);
 	});
 
 	after(async function () {
@@ -75,21 +80,13 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 		}
 	});
 
-	it('should execute a local script importing a remote URL module when script-src is allowed', function () {
-		const testConfigPath = path.join(testTmpDir, 'webload.json');
-		fs.writeFileSync(
-			testConfigPath,
-			JSON.stringify({
-				'script-src': ['http://127.0.0.1:*', 'http://localhost:*']
-			}, null, '\t')
-		);
-
-		const testScriptPath = path.join(testTmpDir, 'test-app.js');
+	it('should execute a local file importing a remote URL module', function () {
+		const testScriptPath = path.join(testTmpDir, 'import_hello.js');
 		fs.writeFileSync(
 			testScriptPath,
 			`
-				import { greet } from 'http://127.0.0.1:${serverPort}/module.js';
-				console.log(greet('NodeTest'));
+				import { hello } from 'http://127.0.0.1:${serverPort}/hello.js';
+				console.log('LOCAL_IMPORT: ' + hello('Node'));
 			`
 		);
 
@@ -98,40 +95,23 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
 		});
 
-		assert.equal(result.status, 0, `Process failed with output:\n${result.stderr}\n${result.stdout}`);
-		assert.match(result.stdout, /Hello NodeTest from submodule/);
+		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+		assert.match(result.stdout, /LOCAL_IMPORT: Hello, Node!/);
 	});
 
-	it('should block remote URL module execution when script-src is not configured (default deny)', function () {
-		const testConfigPath = path.join(testTmpDir, 'empty-webload.json');
-		fs.writeFileSync(
-			testConfigPath,
-			JSON.stringify({
-				'script-src': []
-			}, null, '\t')
-		);
-
-		const testScriptPath = path.join(testTmpDir, 'test-denied.js');
-		fs.writeFileSync(
-			testScriptPath,
-			`
-				import { greet } from 'http://127.0.0.1:${serverPort}/module.js';
-				console.log(greet('Denied'));
-			`
-		);
-
-		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, testScriptPath], {
+	it('should execute an import map entry specifier directly as entrypoint', function () {
+		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, '@hello'], {
 			encoding: 'utf8',
 			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
 		});
 
-		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /violates the following script-src directive/);
+		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
 	});
 
-	it('should execute remote URL entrypoint directly with relative dependency resolution', function () {
-		const testConfigPath = path.join(testTmpDir, 'webload.json');
-		const entryUrl = `http://127.0.0.1:${serverPort}/entrypoint.js`;
+	it('should execute a remote entry point directly when it is the primary module', function () {
+		const entryUrl = `http://127.0.0.1:${serverPort}/hello.js`;
 
 		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, entryUrl], {
 			encoding: 'utf8',
@@ -139,6 +119,46 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 		});
 
 		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
-		assert.match(result.stdout, /ENTRYPOINT_EXECUTED_SUCCESSFULLY_submodule/);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+	});
+
+	it('should execute a remote entry point that imports a relative remote module', function () {
+		const entryUrl = `http://127.0.0.1:${serverPort}/dot_hello.js`;
+
+		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, entryUrl], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+		});
+
+		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+		assert.match(result.stdout, /DOT_HELLO_SUCCESS: Hello, relative!/);
+	});
+
+	it('should enforce default deny when script-src is not configured or empty', function () {
+		const denyConfigPath = path.join(testTmpDir, 'deny-webload.json');
+		fs.writeFileSync(
+			denyConfigPath,
+			JSON.stringify({
+				'script-src': []
+			}, null, '\t')
+		);
+
+		const testScriptPath = path.join(testTmpDir, 'denied-app.js');
+		fs.writeFileSync(
+			testScriptPath,
+			`
+				import { hello } from 'http://127.0.0.1:${serverPort}/hello.js';
+				console.log(hello('Denied'));
+			`
+		);
+
+		const result = spawnSync(wicnodeBin, ['--config', denyConfigPath, testScriptPath], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+		});
+
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /violates the following script-src directive/);
 	});
 });

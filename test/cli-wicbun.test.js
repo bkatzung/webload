@@ -11,12 +11,53 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const wicbunBin = path.resolve(__dirname, '../bin/wicbun');
 
+function getBunRevision () {
+	try {
+		const result = spawnSync('bun', ['--revision'], { encoding: 'utf8' });
+		if (result.error || result.status !== 0) {
+			return null;
+		}
+		return (result.stdout || '').trim();
+	} catch {
+		return null;
+	}
+}
+
+function isBunVersionSupported (rev) {
+	if (!rev) return false;
+	const cleanRev = rev.split('+')[0].trim();
+	const match = cleanRev.match(/^(\d+)\.(\d+)\.(\d+)(?:-canary\.(\d+))?$/);
+	if (!match) return false;
+	const [, maj, min, pat, can] = match.map((x) => (x !== undefined ? Number(x) : undefined));
+
+	if (maj > 1) return true;
+	if (maj < 1) return false;
+	if (min > 4) return true;
+	if (min < 4) return false;
+	if (pat > 4) return true;
+	if (pat < 4) return false;
+	// 1.4.4 further requires canary >= 1
+	if (can === undefined) return false;
+	return can >= 1;
+}
+
+const bunRevision = getBunRevision();
+const isSupported = isBunVersionSupported(bunRevision);
+const skipReason = isSupported
+	? false
+	: `Bun version >= 1.4.4-canary.1 required (found: ${bunRevision || 'none'}). Plugin onResolve will not activate on older versions.`;
+
 describe('CLI: wicbun (Bun URL Import Runner)', function () {
 	let serverWorker;
 	let serverPort;
 	let testTmpDir;
+	let testConfigPath;
 
 	before(async function () {
+		if (!isSupported) {
+			return;
+		}
+
 		testTmpDir = path.join(os.tmpdir(), `webload-test-bun-${Date.now()}`);
 		fs.mkdirSync(testTmpDir, { recursive: true });
 
@@ -26,26 +67,19 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 				import { parentPort } from 'node:worker_threads';
 
 				const server = http.createServer((req, res) => {
-					if (req.url === '/module.js') {
+					if (req.url === '/hello.js') {
 						res.writeHead(200, { 'Content-Type': 'application/javascript' });
 						res.end(\`
-							import { sub } from './sub.js';
-							export function compute (x) {
-								return x * 42 + sub();
+							console.log('HELLO_MODULE_EXECUTED');
+							export function hello (name = 'world') {
+								return 'Hello, ' + name + '!';
 							}
 						\`);
-					} else if (req.url === '/sub.js') {
+					} else if (req.url === '/dot_hello.js') {
 						res.writeHead(200, { 'Content-Type': 'application/javascript' });
 						res.end(\`
-							export function sub () {
-								return 10;
-							}
-						\`);
-					} else if (req.url === '/entrypoint.js') {
-						res.writeHead(200, { 'Content-Type': 'application/javascript' });
-						res.end(\`
-							import { sub } from './sub.js';
-							console.log('BUN_ENTRYPOINT_SUCCESS_' + sub());
+							import { hello } from './hello.js';
+							console.log('DOT_HELLO_SUCCESS: ' + hello('relative'));
 						\`);
 					} else {
 						res.writeHead(404);
@@ -64,10 +98,21 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 			});
 			serverWorker.on('error', reject);
 		});
+
+		testConfigPath = path.join(testTmpDir, 'webload.json');
+		fs.writeFileSync(
+			testConfigPath,
+			JSON.stringify({
+				imports: {
+					'@hello': `http://127.0.0.1:${serverPort}/hello.js`
+				},
+				'script-src': ['http://127.0.0.1:*', 'http://localhost:*']
+			}, null, '\t')
+		);
 	});
 
 	after(async function () {
-		if (fs.existsSync(testTmpDir)) {
+		if (testTmpDir && fs.existsSync(testTmpDir)) {
 			fs.rmSync(testTmpDir, { recursive: true, force: true });
 		}
 		if (serverWorker) {
@@ -75,21 +120,13 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 		}
 	});
 
-	it('should execute a script importing remote URL module in Bun when script-src is allowed', function () {
-		const testConfigPath = path.join(testTmpDir, 'webload.json');
-		fs.writeFileSync(
-			testConfigPath,
-			JSON.stringify({
-				'script-src': ['http://127.0.0.1:*', 'http://localhost:*']
-			}, null, '\t')
-		);
-
-		const testScriptPath = path.join(testTmpDir, 'app.js');
+	it('should execute a local file importing a remote URL module', { skip: skipReason }, function () {
+		const testScriptPath = path.join(testTmpDir, 'import_hello.js');
 		fs.writeFileSync(
 			testScriptPath,
 			`
-				import { compute } from 'http://127.0.0.1:${serverPort}/module.js';
-				console.log('RESULT=' + compute(2));
+				import { hello } from 'http://127.0.0.1:${serverPort}/hello.js';
+				console.log('LOCAL_IMPORT: ' + hello('Bun'));
 			`
 		);
 
@@ -99,13 +136,49 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 		});
 
 		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
-		assert.match(result.stdout, /RESULT=94/);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+		assert.match(result.stdout, /LOCAL_IMPORT: Hello, Bun!/);
 	});
 
-	it('should enforce default deny in Bun when script-src is missing or empty', function () {
-		const testConfigPath = path.join(testTmpDir, 'deny-webload.json');
+	it('should execute an import map entry specifier directly as entrypoint', { skip: skipReason }, function () {
+		const result = spawnSync(wicbunBin, ['--config', testConfigPath, '@hello'], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+		});
+
+		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+	});
+
+	it('should execute a remote entry point directly when it is the primary module', { skip: skipReason }, function () {
+		const entryUrl = `http://127.0.0.1:${serverPort}/hello.js`;
+
+		const result = spawnSync(wicbunBin, ['--config', testConfigPath, entryUrl], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+		});
+
+		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+	});
+
+	it('should execute a remote entry point that imports a relative remote module', { skip: skipReason }, function () {
+		const entryUrl = `http://127.0.0.1:${serverPort}/dot_hello.js`;
+
+		const result = spawnSync(wicbunBin, ['--config', testConfigPath, entryUrl], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+		});
+
+		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+		assert.match(result.stdout, /DOT_HELLO_SUCCESS: Hello, relative!/);
+	});
+
+	it('should enforce default deny when script-src is not configured or empty', { skip: skipReason }, function () {
+		const denyConfigPath = path.join(testTmpDir, 'deny-webload.json');
 		fs.writeFileSync(
-			testConfigPath,
+			denyConfigPath,
 			JSON.stringify({
 				'script-src': []
 			}, null, '\t')
@@ -115,30 +188,17 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 		fs.writeFileSync(
 			testScriptPath,
 			`
-				import { compute } from 'http://127.0.0.1:${serverPort}/module.js';
-				console.log('RESULT=' + compute(2));
+				import { hello } from 'http://127.0.0.1:${serverPort}/hello.js';
+				console.log(hello('Denied'));
 			`
 		);
 
-		const result = spawnSync(wicbunBin, ['--config', testConfigPath, testScriptPath], {
+		const result = spawnSync(wicbunBin, ['--config', denyConfigPath, testScriptPath], {
 			encoding: 'utf8',
 			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
 		});
 
 		assert.notEqual(result.status, 0);
 		assert.match(result.stderr, /violates the following script-src directive/);
-	});
-
-	it('should execute remote URL entrypoint directly in Bun', function () {
-		const testConfigPath = path.join(testTmpDir, 'webload.json');
-		const entryUrl = `http://127.0.0.1:${serverPort}/entrypoint.js`;
-
-		const result = spawnSync(wicbunBin, ['--config', testConfigPath, entryUrl], {
-			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
-		});
-
-		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
-		assert.match(result.stdout, /BUN_ENTRYPOINT_SUCCESS_10/);
 	});
 });
