@@ -22,7 +22,14 @@ function getWorker () {
 	if (!workerInstance) {
 		const currentDir = path.dirname(fileURLToPath(import.meta.url));
 		const workerPath = path.join(currentDir, 'sync-fetch-worker.js');
+
 		workerInstance = new Worker(workerPath);
+		workerInstance.on('error', (err) => {
+			console.error('[sync-fetch] Worker error event:', err);
+		});
+		workerInstance.on('exit', (code) => {
+			console.log('[sync-fetch] Worker exit event with code:', code);
+		});
 		workerInstance.unref();
 	}
 	return workerInstance;
@@ -47,6 +54,7 @@ export function fetchSync (targetUrl, options = {}) {
 
 	const statusBuffer = new SharedArrayBuffer(4);
 	const status = new Int32Array(statusBuffer);
+
 	Atomics.store(status, 0, 0); // 0 = pending
 
 	worker.postMessage({
@@ -71,9 +79,11 @@ export function fetchSync (targetUrl, options = {}) {
 
 	if (statusCode === 2) {
 		let errMsg = 'Network fetch failed';
+
 		try {
 			if (fs.existsSync(tempOutPath)) {
 				const info = JSON.parse(fs.readFileSync(tempOutPath, 'utf8'));
+
 				errMsg = `Fetch failed with status ${info.status} ${info.statusText || ''} for ${urlStr}`;
 				fs.unlinkSync(tempOutPath);
 			}

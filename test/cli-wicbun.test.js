@@ -1,9 +1,9 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { Worker } from 'node:worker_threads';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -12,44 +12,67 @@ const __dirname = path.dirname(__filename);
 const wicbunBin = path.resolve(__dirname, '../bin/wicbun');
 
 describe('CLI: wicbun (Bun URL Import Runner)', function () {
-	let server;
+	let serverWorker;
 	let serverPort;
 	let testTmpDir;
 
-	before(function (t, done) {
+	before(async function () {
 		testTmpDir = path.join(os.tmpdir(), `webload-test-bun-${Date.now()}`);
 		fs.mkdirSync(testTmpDir, { recursive: true });
 
-		server = http.createServer(function (req, res) {
-			if (req.url === '/module.js') {
-				res.writeHead(200, { 'Content-Type': 'application/javascript' });
-				res.end(`
-					export function compute (x) {
-						return x * 42;
-					}
-				`);
-			} else if (req.url === '/entrypoint.js') {
-				res.writeHead(200, { 'Content-Type': 'application/javascript' });
-				res.end(`
-					console.log('BUN_ENTRYPOINT_SUCCESS');
-				`);
-			} else {
-				res.writeHead(404);
-				res.end('Not found');
-			}
-		});
+		serverPort = await new Promise((resolve, reject) => {
+			const workerCode = `
+				import http from 'node:http';
+				import { parentPort } from 'node:worker_threads';
 
-		server.listen(0, '127.0.0.1', function () {
-			serverPort = server.address().port;
-			done();
+				const server = http.createServer((req, res) => {
+					if (req.url === '/module.js') {
+						res.writeHead(200, { 'Content-Type': 'application/javascript' });
+						res.end(\`
+							import { sub } from './sub.js';
+							export function compute (x) {
+								return x * 42 + sub();
+							}
+						\`);
+					} else if (req.url === '/sub.js') {
+						res.writeHead(200, { 'Content-Type': 'application/javascript' });
+						res.end(\`
+							export function sub () {
+								return 10;
+							}
+						\`);
+					} else if (req.url === '/entrypoint.js') {
+						res.writeHead(200, { 'Content-Type': 'application/javascript' });
+						res.end(\`
+							import { sub } from './sub.js';
+							console.log('BUN_ENTRYPOINT_SUCCESS_' + sub());
+						\`);
+					} else {
+						res.writeHead(404);
+						res.end('Not found');
+					}
+				});
+
+				server.listen(0, '127.0.0.1', () => {
+					parentPort.postMessage({ port: server.address().port });
+				});
+			`;
+
+			serverWorker = new Worker(workerCode, { eval: true });
+			serverWorker.on('message', (msg) => {
+				if (msg.port) resolve(msg.port);
+			});
+			serverWorker.on('error', reject);
 		});
 	});
 
-	after(function (t, done) {
+	after(async function () {
 		if (fs.existsSync(testTmpDir)) {
 			fs.rmSync(testTmpDir, { recursive: true, force: true });
 		}
-		server.close(done);
+		if (serverWorker) {
+			await serverWorker.terminate();
+		}
 	});
 
 	it('should execute a script importing remote URL module in Bun when script-src is allowed', function () {
@@ -76,7 +99,7 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 		});
 
 		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
-		assert.match(result.stdout, /RESULT=84/);
+		assert.match(result.stdout, /RESULT=94/);
 	});
 
 	it('should enforce default deny in Bun when script-src is missing or empty', function () {
@@ -116,6 +139,6 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 		});
 
 		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
-		assert.match(result.stdout, /BUN_ENTRYPOINT_SUCCESS/);
+		assert.match(result.stdout, /BUN_ENTRYPOINT_SUCCESS_10/);
 	});
 });

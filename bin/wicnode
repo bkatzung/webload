@@ -79,6 +79,7 @@ async function main () {
 	}
 
 	const env = Object.assign({}, process.env);
+	env.WEBLOAD_MAIN = entrypoint;
 	if (configPath) {
 		env.WEBLOAD_CONFIG = path.resolve(process.cwd(), configPath);
 	}
@@ -86,7 +87,7 @@ async function main () {
 	const finalArgs = [
 		'--import', registerHookPath,
 		...nodeArgs,
-		entrypoint,
+		'WEBLOAD:MAIN',
 		...scriptArgs
 	];
 

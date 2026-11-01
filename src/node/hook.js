@@ -44,26 +44,19 @@ export function resolve (specifier, context, nextResolve) {
 	const config = getConfig();
 	const parentURL = context?.parentURL || null;
 
-	let target = specifier;
-	const webEntry = !parentURL && target.match(/^(file:\/\/.*?\/)(https?:)(\/.*)/i);
-
-	if (webEntry) {
-		// De-file file:-ized http(s) entry-point
-		target = webEntry[2] + '/' + webEntry[3];
-	}
-
+	// Resolve unmodified original entry point if sentinel detected, or specifier otherwise
+	let target = (!parentURL && specifier.endsWith('/WEBLOAD:MAIN')) ? process.env.WEBLOAD_MAIN : specifier;
 	const importMap = {
 		imports: config.imports || {},
 		scopes: config.scopes || {}
 	};
-
 	const remapped = resolveImportMap(target, parentURL, importMap, config.configBaseUrl);
 
 	if (remapped) {
 		target = remapped;
 	}
 
-	// 2. Check if target is a remote HTTP/HTTPS URL
+	// Check if target is a remote HTTP/HTTPS URL
 	if (/^https?:\/\//i.test(target)) {
 		return {
 			url: target,
@@ -71,10 +64,11 @@ export function resolve (specifier, context, nextResolve) {
 		};
 	}
 
-	// 3. Resolve relative file paths to absolute URLs when parent URL is http(s)
+	// Resolve relative file paths to absolute URLs when parent URL is http(s)
 	if (parentURL && /^https?:\/\//i.test(parentURL)) {
 		if (target.startsWith('./') || target.startsWith('../') || target.startsWith('/')) {
 			const resolvedUrl = new URL(target, parentURL).href;
+
 			return {
 				url: resolvedUrl,
 				shortCircuit: true
@@ -82,7 +76,7 @@ export function resolve (specifier, context, nextResolve) {
 		}
 	}
 
-	return nextResolve(specifier, context);
+	return nextResolve(target, context);
 }
 
 /**

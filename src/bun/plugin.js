@@ -1,15 +1,15 @@
 /**
  * WebLoad Bun Plugin Integration
  * Intercepts HTTP/HTTPS URLs and import-map remapped specifiers in Bun runtime.
+ * Separates Resolution (onResolve) from Loading (onLoad).
  */
 
 import { plugin } from 'bun';
-import path from 'node:path';
-import fs from 'node:fs';
 import { resolveConfig } from '../config.js';
 import { resolveImportMap } from '../import-map.js';
 import { validateScriptSrc } from '../security.js';
-import { isCached, getCachePath, writeToCacheSync } from '../cache.js';
+import { isCached, readFromCacheSync } from '../cache.js';
+import { fetchSync } from '../node/sync-fetch.js';
 
 let activeConfig = null;
 
@@ -35,6 +35,7 @@ export function setConfig (cfg) {
 
 /**
  * Creates and registers the WebLoad Bun plugin.
+ * NOTE: Requires bun 1.4.4-canary.1 or later
  * @param {Object} [customConfig]
  */
 export function registerWebloadBunPlugin (customConfig = null) {
@@ -51,101 +52,75 @@ export function registerWebloadBunPlugin (customConfig = null) {
 				scopes: config.scopes || {}
 			};
 
-			// Intercept HTTP and HTTPS URLs
-			build.onResolve({ filter: /^https?:\/\// }, async function (args) {
+			build.onResolve({ filter: /.*/ }, function (args) {
 				const specifier = args.path;
-				const importer = args.importer || null;
+				const webMain = specifier === 'WEBLOAD:MAIN';
+				const importer = args.importer?.replace(/^_http_:/, '') || null;
+				// Resolve the original, unmodified entry point if sentinel detected, or specifier otherwise
+				let target = (specifier === 'WEBLOAD:MAIN') ? process.env.WEBLOAD_MAIN : specifier;
 
-				// 1. Resolve via import map if applicable
-				const remapped = resolveImportMap(specifier, importer, importMap, config.configBaseUrl);
-				const targetUrl = remapped || specifier;
-				console.log('target', targetURL);
+				const remapped = resolveImportMap(target, importer, importMap, config.configBaseUrl);
 
-				// 2. Validate against script-src allowlist
-				validateScriptSrc(targetUrl, config.scriptSrc);
-
-				const cacheDir = config.cacheDir;
-				let localPath = getCachePath(targetUrl, cacheDir);
-				console.log('local', localPath);
-
-				// 3. Cache lookup & fetch on miss
-				if (!isCached(targetUrl, cacheDir)) {
-					const res = await fetch(targetUrl, {
-						headers: {
-							'User-Agent': 'WebLoad/0.1.0 (Bun)'
-						},
-						redirect: 'follow'
-					});
-
-					if (!res.ok) {
-						throw new Error(`Failed to fetch remote module '${targetUrl}': ${res.status} ${res.statusText}`);
-					}
-
-					const content = await res.text();
-					const contentType = res.headers.get('content-type') || 'application/javascript';
-					localPath = writeToCacheSync(
-						res.url || targetUrl,
-						content,
-						{ contentType },
-						cacheDir
-					);
+				if (remapped) {
+					target = remapped;
 				}
 
-				return {
-					path: localPath
-				};
+				// Check if target is a remote HTTP/HTTPS URL
+				if (/^https?:\/\//i.test(target)) {
+					return {
+						path: target,
+						namespace: '_http_'
+					};
+				}
+
+				const fileTarget = /^\.{0,2}\//.test(target);
+
+				// Resolve relative file paths to absolute URLs when parent URL is http(s)
+				if (/^https?:\/\//i.test(importer)) {
+					if (fileTarget) {
+						const resolvedUrl = new URL(target, importer).href;
+
+						return {
+							path: resolvedUrl,
+							namespace: '_http_'
+						};
+					}
+				}
+
+				if (fileTarget) {
+					return {
+						path: target,
+						namespace: 'file'
+					}
+				}
 			});
 
-			// Intercept bare specifiers mapped via import map
-			if (config.imports && Object.keys(config.imports).length > 0) {
-				const keys = Object.keys(config.imports);
-				for (const key of keys) {
-					const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-					const regex = new RegExp(`^${escapedKey}`);
+			build.onLoad({ filter: /.*/, namespace: '_http_' }, function (args) {
+				const url = args.path;
 
-					build.onResolve({ filter: regex }, async function (args) {
-						const specifier = args.path;
-						const importer = args.importer || null;
-						const remapped = resolveImportMap(specifier, importer, importMap, config.configBaseUrl);
+				// 1. Security validation
+				validateScriptSrc(url, config.scriptSrc);
 
-						if (remapped && /^https?:\/\//i.test(remapped)) {
-							// Validate security
-							validateScriptSrc(remapped, config.scriptSrc);
+				// 2. Cache lookup and cache-miss fetch
+				const cacheDir = config.cacheDir;
+				let contents;
 
-							const cacheDir = config.cacheDir;
-							let localPath = getCachePath(remapped, cacheDir);
+				if (isCached(url, cacheDir)) {
+					const cached = readFromCacheSync(url, cacheDir);
 
-							if (!isCached(remapped, cacheDir)) {
-								const res = await fetch(remapped, {
-									headers: {
-										'User-Agent': 'WebLoad/0.1.0 (Bun)'
-									},
-									redirect: 'follow'
-								});
+					contents = cached?.code;
+				} else {
+					const fetchResult = fetchSync(url, { cacheDir });
 
-								if (!res.ok) {
-									throw new Error(`Failed to fetch remote module '${remapped}': ${res.status} ${res.statusText}`);
-								}
-
-								const content = await res.text();
-								const contentType = res.headers.get('content-type') || 'application/javascript';
-								localPath = writeToCacheSync(
-									res.url || remapped,
-									content,
-									{ contentType },
-									cacheDir
-								);
-							}
-
-							return {
-								path: localPath
-							};
-						}
-
-						return undefined;
-					});
+					contents = fetchResult.content;
 				}
-			}
+
+				// 3. Return module source
+				return {
+					contents,
+					loader: 'js'
+				};
+			});
 		}
 	});
 }

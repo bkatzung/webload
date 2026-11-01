@@ -1,9 +1,9 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { Worker } from 'node:worker_threads';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -12,52 +12,67 @@ const __dirname = path.dirname(__filename);
 const wicnodeBin = path.resolve(__dirname, '../bin/wicnode');
 
 describe('CLI: wicnode (Node.js URL Import Runner)', function () {
-	let server;
+	let serverWorker;
 	let serverPort;
 	let testTmpDir;
 
-	before(function (t, done) {
+	before(async function () {
 		testTmpDir = path.join(os.tmpdir(), `webload-test-node-${Date.now()}`);
 		fs.mkdirSync(testTmpDir, { recursive: true });
 
-		server = http.createServer(function (req, res) {
-			if (req.url === '/module.js') {
-				res.writeHead(200, { 'Content-Type': 'application/javascript' });
-				res.end(`
-					import { sub } from './sub.js';
-					export function greet (name) {
-						return 'Hello ' + name + ' from ' + sub();
-					}
-				`);
-			} else if (req.url === '/sub.js') {
-				res.writeHead(200, { 'Content-Type': 'application/javascript' });
-				res.end(`
-					export function sub () {
-						return 'submodule';
-					}
-				`);
-			} else if (req.url === '/entrypoint.js') {
-				res.writeHead(200, { 'Content-Type': 'application/javascript' });
-				res.end(`
-					console.log('ENTRYPOINT_EXECUTED_SUCCESSFULLY');
-				`);
-			} else {
-				res.writeHead(404);
-				res.end('Not found');
-			}
-		});
+		serverPort = await new Promise((resolve, reject) => {
+			const workerCode = `
+				import http from 'node:http';
+				import { parentPort } from 'node:worker_threads';
 
-		server.listen(0, '127.0.0.1', function () {
-			serverPort = server.address().port;
-			done();
+				const server = http.createServer((req, res) => {
+					if (req.url === '/module.js') {
+						res.writeHead(200, { 'Content-Type': 'application/javascript' });
+						res.end(\`
+							import { sub } from './sub.js';
+							export function greet (name) {
+								return 'Hello ' + name + ' from ' + sub();
+							}
+						\`);
+					} else if (req.url === '/sub.js') {
+						res.writeHead(200, { 'Content-Type': 'application/javascript' });
+						res.end(\`
+							export function sub () {
+								return 'submodule';
+							}
+						\`);
+					} else if (req.url === '/entrypoint.js') {
+						res.writeHead(200, { 'Content-Type': 'application/javascript' });
+						res.end(\`
+							import { sub } from './sub.js';
+							console.log('ENTRYPOINT_EXECUTED_SUCCESSFULLY_' + sub());
+						\`);
+					} else {
+						res.writeHead(404);
+						res.end('Not found');
+					}
+				});
+
+				server.listen(0, '127.0.0.1', () => {
+					parentPort.postMessage({ port: server.address().port });
+				});
+			`;
+
+			serverWorker = new Worker(workerCode, { eval: true });
+			serverWorker.on('message', (msg) => {
+				if (msg.port) resolve(msg.port);
+			});
+			serverWorker.on('error', reject);
 		});
 	});
 
-	after(function (t, done) {
+	after(async function () {
 		if (fs.existsSync(testTmpDir)) {
 			fs.rmSync(testTmpDir, { recursive: true, force: true });
 		}
-		server.close(done);
+		if (serverWorker) {
+			await serverWorker.terminate();
+		}
 	});
 
 	it('should execute a local script importing a remote URL module when script-src is allowed', function () {
@@ -114,7 +129,7 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 		assert.match(result.stderr, /violates the following script-src directive/);
 	});
 
-	it('should execute remote URL entrypoint directly', function () {
+	it('should execute remote URL entrypoint directly with relative dependency resolution', function () {
 		const testConfigPath = path.join(testTmpDir, 'webload.json');
 		const entryUrl = `http://127.0.0.1:${serverPort}/entrypoint.js`;
 
@@ -124,6 +139,6 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 		});
 
 		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
-		assert.match(result.stdout, /ENTRYPOINT_EXECUTED_SUCCESSFULLY/);
+		assert.match(result.stdout, /ENTRYPOINT_EXECUTED_SUCCESSFULLY_submodule/);
 	});
 });
