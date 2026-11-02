@@ -35,7 +35,7 @@ export function setConfig (cfg) {
 
 /**
  * Creates and registers the WebLoad Bun plugin.
- * NOTE: Requires bun 1.4.4-canary.1 or later
+ * NOTE: Requires bun 1.4.4-canary.1 (*post-release*) or later
  * @param {Object} [customConfig]
  */
 export function registerWebloadBunPlugin (customConfig = null) {

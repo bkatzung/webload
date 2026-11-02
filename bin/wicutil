@@ -121,7 +121,7 @@ async function main () {
 		console.log(`[wicutil] Cached modules in ${cacheDir} (${items.length} total):\n`);
 		for (const item of items) {
 			const sizeStr = formatBytes(item.size);
-			const dateStr = item.cachedAt ? new Date(item.cachedAt).toLocaleString() : 'unknown';
+			const dateStr = item.cachedAt || 'unknown';
 			console.log(`- URL:  ${item.url}`);
 			console.log(`  Path: ${item.filePath}`);
 			console.log(`  Size: ${sizeStr} | Cached: ${dateStr}\n`);
