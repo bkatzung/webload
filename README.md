@@ -21,12 +21,12 @@ WebLoad brings browser-grade and Deno-like URL imports to **Node.js** and **Bun*
 
 ```bash
 # Install globally
-npm install -g webload
+npm install -g @bkatzung/webload
 # or
-bun install -g webload
+bun install -g @bkatzung/webload
 
 # Or add as project dependency
-npm install webload
+npm install @bkatzung/webload
 ```
 
 ---
@@ -88,7 +88,7 @@ For full CLI documentation and workflows, see the [CLI Tools Guide](docs/cli.md)
 Register the loader hook programmatically or via Node `--import`:
 
 ```bash
-node --import webload/node ./index.js
+node --import @bkatzung/webload/node ./index.js
 ```
 
 ### In Bun
@@ -96,7 +96,7 @@ node --import webload/node ./index.js
 Preload the Bun plugin:
 
 ```bash
-bun -r webload/bun ./index.ts
+bun -r @bkatzung/webload/bun ./index.ts
 ```
 
 ---

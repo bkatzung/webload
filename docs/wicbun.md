@@ -16,7 +16,7 @@ When WebLoad is installed globally or as a project dependency:
 
 ```bash
 # Global execution
-bun install -g webload
+bun install -g @bkatzung/webload
 wicbun ./app.js
 
 # Or directly with bunx

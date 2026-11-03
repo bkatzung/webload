@@ -1,5 +1,5 @@
 {
-  "name": "webload",
+  "name": "@bkatzung/webload",
   "version": "0.1.0",
   "description": "Seamless URL module loading and caching for Node.js and Bun with CSP-like security and WICG import maps",
   "type": "module",
@@ -18,6 +18,23 @@
     "./bun": "./src/bun/plugin.js",
     "./node": "./src/node/hook.js"
   },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bkatzung/webload.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bkatzung/webload/issues"
+  },
+  "homepage": "https://github.com/bkatzung/webload#readme",
   "scripts": {
     "test": "node --test test/**/*.test.js"
   },

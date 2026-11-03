@@ -10,7 +10,7 @@ When WebLoad is installed globally or as a project dependency:
 
 ```bash
 # Global execution
-npm install -g webload
+npm install -g @bkatzung/webload
 wicutil --list
 
 # Or via npx
