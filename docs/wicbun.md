@@ -29,15 +29,19 @@ bunx wicbun ./app.js
 
 ```bash
 wicbun [options] <file-or-url> [script-args...]
+wicbun [options] -e, --eval <code> [script-args...]
+wicbun [options] --test [test-files...]
 ```
 
 ---
 
-## Arguments
+## Execution Modes & Arguments
 
-| Argument | Description |
+| Mode / Argument | Description |
 |---|---|
-| `<file-or-url>` | **(Required)** Entry-point: a path to a local JavaScript/TypeScript/ES module file, a remote HTTP/HTTPS URL, or an import map bare specifier alias (e.g. `@app`). |
+| `<file-or-url>` | Entry-point: a path to a local JavaScript/TypeScript/ES module file, a remote HTTP/HTTPS URL, or an import map bare specifier alias (e.g. `@app`). Required when not running in `-e`/`--eval` or `--test` mode. |
+| `-e, --eval <code>` | Evaluate the provided string as JavaScript (with ES module import capabilities). |
+| `--test [test-files...]` | Execute test files using Bun's built-in test runner with WebLoad loader plugin active for all imported remote modules. |
 | `[script-args...]` | Additional arguments passed through to the executed script (available via `process.argv`). |
 
 ---
@@ -46,6 +50,8 @@ wicbun [options] <file-or-url> [script-args...]
 
 | Flag | Description |
 |---|---|
+| `-e, --eval <code>` | Evaluate inline string as JavaScript with ES module support. |
+| `--test` | Run Bun built-in test runner. |
 | `--config <path>` | Specify a custom path to a `webload.json` configuration file. |
 | `-h`, `--help` | Display the CLI help message and exit. |
 | `-v`, `--version` | Display the current WebLoad version and exit. |
@@ -96,7 +102,23 @@ Run directly:
 wicbun @app
 ```
 
-### 4. Provide Custom Configuration and Script Arguments
+### 4. Evaluate Inline Code with URL Imports (`-e` / `--eval`)
+
+```bash
+wicbun -e "import { chunk } from 'https://esm.sh/lodash-es@4.17.21'; console.log(chunk([1, 2, 3, 4], 2));"
+```
+
+### 5. Run Tests with Built-in Test Runner (`--test`)
+
+```bash
+# Run all test files matching standard patterns
+wicbun --test
+
+# Run specific test file
+wicbun --test test/my-service.test.js
+```
+
+### 6. Provide Custom Configuration and Script Arguments
 
 ```bash
 wicbun --config ./configs/custom-webload.json ./server.js --port 3000

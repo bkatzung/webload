@@ -6,10 +6,20 @@
 import { parentPort } from 'node:worker_threads';
 import fs from 'node:fs';
 
+const logFile = '/tmp/sync-fetch-worker.log';
+
+function log (message) {
+	fs.appendFileSync(logFile, message);
+}
+
+log(`worker started; parentPort ${parentPort ? 'yes' : 'no'}\n`);
+
 if (parentPort) {
 	parentPort.on('message', async function (msg) {
 		const { id, url, tempOutPath, statusBuffer } = msg;
 		const status = new Int32Array(statusBuffer);
+
+		log(`fetch URL ${url}\n`);
 
 		try {
 			const res = await fetch(url, {
@@ -19,6 +29,7 @@ if (parentPort) {
 				redirect: 'follow'
 			});
 
+			log(`result: ${res.ok ? 'ok' : 'err'}\n`)
 			if (!res.ok) {
 				const errorInfo = {
 					ok: false,
@@ -48,6 +59,7 @@ if (parentPort) {
 			Atomics.store(status, 0, 1); // 1 = success
 			Atomics.notify(status, 0, 1);
 		} catch (err) {
+			log(`error: ${err.message}\n`);
 			const errorInfo = {
 				ok: false,
 				status: 0,

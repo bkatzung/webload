@@ -48,10 +48,14 @@ Run scripts seamlessly across runtimes:
 # Run in Node.js
 wicnode ./index.js
 wicnode @app
+wicnode -e "import { chunk } from 'https://esm.sh/lodash-es'; console.log(chunk([1, 2, 3], 2));"
+wicnode --test test/app.test.js
 
 # Run in Bun
 wicbun ./index.ts
 wicbun @app
+wicbun -e "import { chunk } from 'https://esm.sh/lodash-es'; console.log(chunk([1, 2, 3], 2));"
+wicbun --test test/app.test.js
 ```
 
 ### 3. Inspect and Manage Cache

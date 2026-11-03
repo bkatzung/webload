@@ -21,5 +21,7 @@
   - [`test/cli-wicutil.test.js`](test/cli-wicutil.test.js)
 
 ## Next Steps to Resume
-- [ ] Run full automated test suite (`npm test`).
-- [ ] Complete user and technical documentation (`README.md`, configuration and CLI reference).
+- [x] Extend `wicnode` to support `--test` and `-e`/`--eval` modes.
+- [x] Extend `wicbun` to support `--test` and `-e`/`--eval` modes.
+- [x] Run full automated test suite (`npm test`).
+- [x] Complete user and technical documentation (`README.md`, configuration and CLI reference).

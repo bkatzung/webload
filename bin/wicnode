@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const registerHookPath = path.resolve(__dirname, '../src/node/register_hook.js');
+const hookPath = path.resolve(__dirname, '../src/node/hook.js');
 const VERSION = '0.1.0';
 
 function printHelp () {
@@ -19,8 +19,12 @@ WebLoad Node Runner (wicnode)
 
 Usage:
   wicnode [options] <file-or-url> [script-args...]
+  wicnode [options] -e, --eval <code> [script-args...]
+  wicnode [options] --test [test-files...]
 
 Options:
+  -e, --eval <code>  Evaluate string as JavaScript
+  --test             Run Node.js built-in test runner
   --config <path>    Specify path to webload.json configuration
   -h, --help         Show this help message
   -v, --version      Show version
@@ -42,6 +46,10 @@ async function main () {
 	}
 
 	let configPath = null;
+	let isEval = false;
+	let evalCode = null;
+	let isTest = false;
+	const testArgs = [];
 	const nodeArgs = [];
 	let entrypoint = null;
 	const scriptArgs = [];
@@ -56,14 +64,38 @@ async function main () {
 		} else if (arg.startsWith('--config=')) {
 			configPath = arg.slice(9);
 			i += 1;
-		} else if (!entrypoint && !arg.startsWith('-')) {
+		} else if (arg === '-e' || arg === '--eval') {
+			isEval = true;
+			evalCode = args[i + 1];
+			i += 2;
+			scriptArgs.push(...args.slice(i));
+			break;
+		} else if (arg.startsWith('-e=')) {
+			isEval = true;
+			evalCode = arg.slice(3);
+			i += 1;
+			scriptArgs.push(...args.slice(i));
+			break;
+		} else if (arg.startsWith('--eval=')) {
+			isEval = true;
+			evalCode = arg.slice(7);
+			i += 1;
+			scriptArgs.push(...args.slice(i));
+			break;
+		} else if (arg === '--test' || arg.startsWith('--test-') || arg.startsWith('--test=')) {
+			isTest = true;
+			testArgs.push(arg);
+			i += 1;
+		} else if (!entrypoint && !isTest && !arg.startsWith('-')) {
 			entrypoint = arg;
 			i += 1;
 			// Everything after entrypoint is passed to the script
 			scriptArgs.push(...args.slice(i));
 			break;
 		} else {
-			if (!entrypoint) {
+			if (isTest) {
+				testArgs.push(arg);
+			} else if (!entrypoint) {
 				nodeArgs.push(arg);
 			} else {
 				scriptArgs.push(arg);
@@ -72,24 +104,46 @@ async function main () {
 		}
 	}
 
-	if (!entrypoint) {
-		console.error('Error: No entrypoint script or URL specified.');
+	if (!entrypoint && !isEval && !isTest) {
+		console.error('Error: No entrypoint script, eval code, or --test option specified.');
 		printHelp();
 		process.exit(1);
 	}
 
+	if (isEval && evalCode == null) {
+		console.error('Error: -e/--eval option requires code argument.');
+		process.exit(1);
+	}
+
 	const env = Object.assign({}, process.env);
-	env.WEBLOAD_MAIN = entrypoint;
 	if (configPath) {
 		env.WEBLOAD_CONFIG = path.resolve(process.cwd(), configPath);
 	}
 
-	const finalArgs = [
-		'--import', registerHookPath,
-		...nodeArgs,
-		'WEBLOAD:MAIN',
-		...scriptArgs
-	];
+	let finalArgs;
+	if (isEval) {
+		finalArgs = [
+			'--import', hookPath,
+			...nodeArgs,
+			'--eval', evalCode,
+			...scriptArgs
+		];
+	} else if (isTest) {
+		const finalTestArgs = testArgs.includes('--test') ? testArgs : ['--test', ...testArgs];
+		finalArgs = [
+			'--import', hookPath,
+			...nodeArgs,
+			...finalTestArgs
+		];
+	} else {
+		env.WEBLOAD_MAIN = entrypoint;
+		finalArgs = [
+			'--import', hookPath,
+			...nodeArgs,
+			'WEBLOAD:MAIN',
+			...scriptArgs
+		];
+	}
 
 	// Use process.execve when available on non-Windows platforms for process replacement
 	if (process.platform !== 'win32' && typeof process.execve === 'function') {

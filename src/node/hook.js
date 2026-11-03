@@ -3,6 +3,7 @@
  */
 
 import fs from 'node:fs';
+import { registerHooks } from 'node:module';
 import { resolveConfig } from '../config.js';
 import { resolveImportMap } from '../import-map.js';
 import { validateScriptSrc } from '../security.js';
@@ -118,3 +119,5 @@ export function load (url, context, nextLoad) {
 
 	return nextLoad(url, context);
 }
+
+registerHooks({ resolve, load });

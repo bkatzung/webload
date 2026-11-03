@@ -18,7 +18,7 @@ let reqCounter = 0;
  * Initializes or returns the background fetch worker.
  * @returns {Worker}
  */
-function getWorker () {
+export function getWorker () {
 	if (!workerInstance) {
 		const currentDir = path.dirname(fileURLToPath(import.meta.url));
 		const workerPath = path.join(currentDir, 'sync-fetch-worker.js');

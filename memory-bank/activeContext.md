@@ -34,5 +34,5 @@
 ---
 
 ## Next Steps to Resume
-1. Run test suite: `npm test` across Node and Bun.
-2. Complete documentation (`README.md` and CLI guides).
+1. Run full automated test suite (`npm test`).
+2. Complete user and technical documentation (`README.md`, configuration and CLI reference).

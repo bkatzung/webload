@@ -52,6 +52,7 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 	let serverPort;
 	let testTmpDir;
 	let testConfigPath;
+	let cacheCount = 0;
 
 	before(async function () {
 		if (!isSupported) {
@@ -132,7 +133,7 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 
 		const result = spawnSync(wicbunBin, ['--config', testConfigPath, testScriptPath], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
@@ -143,7 +144,7 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 	it('should execute an import map entry specifier directly as entrypoint', { skip: skipReason }, function () {
 		const result = spawnSync(wicbunBin, ['--config', testConfigPath, '@hello'], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
@@ -155,7 +156,7 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 
 		const result = spawnSync(wicbunBin, ['--config', testConfigPath, entryUrl], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
@@ -167,7 +168,7 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 
 		const result = spawnSync(wicbunBin, ['--config', testConfigPath, entryUrl], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
@@ -195,10 +196,66 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 
 		const result = spawnSync(wicbunBin, ['--config', denyConfigPath, testScriptPath], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.notEqual(result.status, 0);
 		assert.match(result.stderr, /violates the following script-src directive/);
+	});
+
+	it('should pass script-args to -e / --eval code', { skip: skipReason }, function () {
+		const evalCode = `
+			console.log('ARGS: ' + process.argv.slice(1).join(','));
+		`;
+
+		const result = spawnSync(wicbunBin, ['--config', testConfigPath, '--eval', evalCode, 'foo', 'bar'], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
+		});
+
+		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /ARGS: .*foo.*bar/);
+	});
+
+	it('should evaluate inline code using -e / --eval with URL imports', { skip: skipReason }, function () {
+		const evalCode = `
+			import { hello } from 'http://127.0.0.1:${serverPort}/hello.js';
+			console.log('EVAL_RESULT: ' + hello('Eval'));
+		`;
+
+		const result = spawnSync(wicbunBin, ['--config', testConfigPath, '-e', evalCode], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
+		});
+
+		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+		assert.match(result.stdout, /EVAL_RESULT: Hello, Eval!/);
+	});
+
+	it('should run tests with --test when test files import remote URL modules', { skip: skipReason }, function () {
+		const testFilePath = path.join(testTmpDir, 'test.bun.test.js');
+		fs.writeFileSync(
+			testFilePath,
+			`
+				import { describe, it, expect } from 'bun:test';
+				import { hello } from 'http://127.0.0.1:${serverPort}/hello.js';
+
+				describe('remote module test in wicbun', function () {
+					it('should import and execute correctly inside test runner', function () {
+						expect(hello('Tester')).toBe('Hello, Tester!');
+					});
+				});
+			`
+		);
+
+		const result = spawnSync(wicbunBin, ['--config', testConfigPath, '--test', testFilePath], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
+		});
+
+		const output = result.stdout + '\n' + result.stderr;
+		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(output, /pass/i);
 	});
 });

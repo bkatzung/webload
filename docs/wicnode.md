@@ -23,15 +23,19 @@ npx wicnode ./app.js
 
 ```bash
 wicnode [options] <file-or-url> [script-args...]
+wicnode [options] -e, --eval <code> [script-args...]
+wicnode [options] --test [test-files...]
 ```
 
 ---
 
-## Arguments
+## Execution Modes & Arguments
 
-| Argument | Description |
+| Mode / Argument | Description |
 |---|---|
-| `<file-or-url>` | **(Required)** Entry-point: a path to a local JavaScript/ES module file, a remote HTTP/HTTPS URL, or an import map bare specifier alias (e.g. `@app`). |
+| `<file-or-url>` | Entry-point: a path to a local JavaScript/ES module file, a remote HTTP/HTTPS URL, or an import map bare specifier alias (e.g. `@app`). Required when not running in `-e`/`--eval` or `--test` mode. |
+| `-e, --eval <code>` | Evaluate the provided string as JavaScript (with ES module import capabilities). |
+| `--test [test-files...]` | Execute test files using Node.js's built-in test runner with WebLoad loader hooks active for all imported remote modules. |
 | `[script-args...]` | Additional arguments passed through to the executed script (available via `process.argv`). |
 
 ---
@@ -40,6 +44,8 @@ wicnode [options] <file-or-url> [script-args...]
 
 | Flag | Description |
 |---|---|
+| `-e, --eval <code>` | Evaluate inline string as JavaScript with ES module support. |
+| `--test` | Run Node.js built-in test runner. |
 | `--config <path>` | Specify a custom path to a `webload.json` configuration file. |
 | `-h`, `--help` | Display the CLI help message and exit. |
 | `-v`, `--version` | Display the current WebLoad version and exit. |
@@ -90,7 +96,23 @@ Run directly:
 wicnode @app
 ```
 
-### 4. Provide Custom Configuration and Script Arguments
+### 4. Evaluate Inline Code with URL Imports (`-e` / `--eval`)
+
+```bash
+wicnode -e "import { chunk } from 'https://esm.sh/lodash-es@4.17.21'; console.log(chunk([1, 2, 3, 4], 2));"
+```
+
+### 5. Run Tests with Built-in Test Runner (`--test`)
+
+```bash
+# Run all test files matching standard patterns
+wicnode --test
+
+# Run specific test file
+wicnode --test test/my-service.test.js
+```
+
+### 6. Provide Custom Configuration and Script Arguments
 
 ```bash
 wicnode --config ./configs/custom-webload.json ./server.js --port 8080 --verbose
@@ -120,7 +142,7 @@ If no configuration file is present, a default-deny security policy is applied (
 
 ## How It Works
 
-1. `wicnode` prepares the runtime environment and registers the WebLoad ESM module loader hook (`src/node/register_hook.js`) via Node.js `--import`.
+1. `wicnode` prepares the runtime environment and registers the WebLoad ESM module loader hook (`src/node/hook.js`) via Node.js `--import`.
 2. When importing HTTP/HTTPS URLs or bare specifiers defined in import maps:
    - Validates the target URL against the configured `script-src` CSP allowlist.
    - Checks the local disk cache (`~/.cache/webload`). If cached and valid, serves directly from disk.

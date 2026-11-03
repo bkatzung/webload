@@ -16,6 +16,7 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 	let serverPort;
 	let testTmpDir;
 	let testConfigPath;
+	let cacheCount = 0;
 
 	before(async function () {
 		testTmpDir = path.join(os.tmpdir(), `webload-test-node-${Date.now()}`);
@@ -92,7 +93,7 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 
 		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, testScriptPath], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
@@ -103,7 +104,7 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 	it('should execute an import map entry specifier directly as entrypoint', function () {
 		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, '@hello'], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
@@ -115,7 +116,7 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 
 		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, entryUrl], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
@@ -127,7 +128,7 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 
 		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, entryUrl], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
@@ -155,10 +156,68 @@ describe('CLI: wicnode (Node.js URL Import Runner)', function () {
 
 		const result = spawnSync(wicnodeBin, ['--config', denyConfigPath, testScriptPath], {
 			encoding: 'utf8',
-			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache') }
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
 		});
 
 		assert.notEqual(result.status, 0);
 		assert.match(result.stderr, /violates the following script-src directive/);
+	});
+
+	it('should pass script-args to -e / --eval code', function () {
+		const evalCode = `
+			console.log('ARGS: ' + process.argv.slice(1).join(','));
+		`;
+
+		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, '--eval', evalCode, 'foo', 'bar'], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
+		});
+
+		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /ARGS: foo,bar/);
+	});
+
+	it('should evaluate inline code using -e / --eval with URL imports', function () {
+		const evalCode = `
+			import { hello } from 'http://127.0.0.1:${serverPort}/hello.js';
+			console.log('EVAL_RESULT: ' + hello('Eval'));
+		`;
+
+		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, '-e', evalCode], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
+		});
+
+		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+		assert.match(result.stdout, /EVAL_RESULT: Hello, Eval!/);
+	});
+
+	it('should run tests with --test when test files import remote URL modules', function () {
+		const testFilePath = path.join(testTmpDir, 'test.inner.js');
+		fs.writeFileSync(
+			testFilePath,
+			`
+				import { describe, it } from 'node:test';
+				import assert from 'node:assert/strict';
+				import { hello } from 'http://127.0.0.1:${serverPort}/hello.js';
+
+				describe('remote module test in wicnode', function () {
+					it('should import and execute correctly inside test runner', function () {
+						assert.equal(hello('Tester'), 'Hello, Tester!');
+					});
+				});
+			`
+		);
+
+		// Exclude NODE_TEST_CONTEXT and NODE_TEST_WORKER_ID to avoid nested Node test-runner issues
+		const { NODE_TEST_CONTEXT, NODE_TEST_WORKER_ID, ...env } = { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) };
+		const result = spawnSync(wicnodeBin, ['--config', testConfigPath, '--test', testFilePath], {
+			encoding: 'utf8',
+			env
+		});
+
+		assert.equal(result.status, 0, `Process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /pass 1/i);
 	});
 });
