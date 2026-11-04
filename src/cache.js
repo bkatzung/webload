@@ -59,22 +59,18 @@ export function urlToRelativeCachePath (targetUrl) {
 	const rawSegments = pathname.split('/').filter(Boolean);
 	const segments = rawSegments.map(function (s) { return sanitizePathSegment(s); });
 
+	// Prefix the last (file) path component with $
+	const lastIdx = segments.length - 1;
+	const lastSegment = segments[lastIdx];
+
 	// Handle query parameters if present
 	if (urlObj.search) {
 		const querySuffix = encodeQueryString(urlObj.search);
-		const lastIdx = segments.length - 1;
-		const lastSegment = segments[lastIdx];
 		const ext = path.extname(lastSegment);
 		const base = path.basename(lastSegment, ext);
-		segments[lastIdx] = `${base}${querySuffix}${ext || '.js'}`;
+		segments[lastIdx] = `$${base}${querySuffix}${ext}`;
 	} else {
-		// Ensure file has an extension if none present
-		const lastIdx = segments.length - 1;
-		const lastSegment = segments[lastIdx];
-		const ext = path.extname(lastSegment);
-		if (!ext) {
-			segments[lastIdx] = `${lastSegment}.js`;
-		}
+		segments[lastIdx] = `$${lastSegment}`;
 	}
 
 	return path.join(hostPart, ...segments);
@@ -279,7 +275,9 @@ export function listCache (cacheDir = getCacheDir()) {
 				if (!url) {
 					// Infer original URL from relative path
 					const rel = path.relative(cacheDir, fullPath).replace(/\\/g, '/');
-					url = `https://${rel}`;
+					const parts = rel.split('/');
+					parts[parts.length - 1] = parts[parts.length - 1].replace(/^\$/, '');
+					url = `https://${parts.join('/')}`;
 				}
 
 				results.push({

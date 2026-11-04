@@ -1,6 +1,6 @@
 {
   "name": "@bkatzung/webload",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Seamless URL module loading and caching for Node.js and Bun with CSP-like security and WICG import maps",
   "type": "module",
   "main": "./src/index.js",

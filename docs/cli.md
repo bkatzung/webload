@@ -42,7 +42,7 @@ Create a `webload.json` configuration file in your project root or user home dir
 
 ### 2. Execute Code
 
-Run scripts seamlessly across runtimes:
+Run scripts seamlessly across runtimes (note that local entry-point script paths must begin with `/`, `./`, or `../`, e.g. `./index.js` or `./src/app.js`):
 
 ```bash
 # Run in Node.js

@@ -33,7 +33,7 @@ wicnode [options] --test [test-files...]
 
 | Mode / Argument | Description |
 |---|---|
-| `<file-or-url>` | Entry-point: a path to a local JavaScript/ES module file, a remote HTTP/HTTPS URL, or an import map bare specifier alias (e.g. `@app`). Required when not running in `-e`/`--eval` or `--test` mode. |
+| `<file-or-url>` | Entry-point: a path to a local JavaScript/ES module file, a remote HTTP/HTTPS URL, or an import map bare specifier alias (e.g. `@app`). Local entry-point script paths must begin with `/`, `./`, or `../` (e.g. `./src/foo.js` instead of `src/foo.js`) to be properly classified as local files rather than package specifiers. Required when not running in `-e`/`--eval` or `--test` mode. |
 | `-e, --eval <code>` | Evaluate the provided string as JavaScript (with ES module import capabilities). |
 | `--test [test-files...]` | Execute test files using Node.js's built-in test runner with WebLoad loader hooks active for all imported remote modules. |
 | `[script-args...]` | Additional arguments passed through to the executed script (available via `process.argv`). |

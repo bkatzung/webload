@@ -29,20 +29,34 @@ describe('WebLoad Cache Subsystem: Atomic Local Filesystem Cache', function () {
 	});
 
 	describe('urlToRelativeCachePath', function () {
-		it('should convert standard URLs to hierarchical relative paths', function () {
+		it('should convert standard URLs to hierarchical relative paths with $ prefix on final component', function () {
 			const rel = urlToRelativeCachePath('https://esm.sh/lodash-es@4.17.21/lodash.js');
-			assert.equal(rel, path.join('esm.sh', 'lodash-es@4.17.21', 'lodash.js'));
+			assert.equal(rel, path.join('esm.sh', 'lodash-es@4.17.21', '$lodash.js'));
 		});
 
 		it('should handle ports and queries cleanly', function () {
 			const rel = urlToRelativeCachePath('http://localhost:3000/app.js?dev=true');
 			assert.match(rel, /localhost_3000/);
-			assert.match(rel, /app_q_/);
+			assert.match(rel, /\$app_q_/);
 		});
 
-		it('should append .js for extensionless URLs', function () {
+		it('should preserve original extension or lack thereof with $ prefix', function () {
 			const rel = urlToRelativeCachePath('https://esm.sh/lodash');
-			assert.equal(rel, path.join('esm.sh', 'lodash.js'));
+			assert.equal(rel, path.join('esm.sh', '$lodash'));
+		});
+
+		it('should allow package root URLs and nested subpaths to coexist without ENOTDIR collision', function () {
+			const rootRel = urlToRelativeCachePath('https://esm.sh/acorn@8.15.0');
+			const subRel = urlToRelativeCachePath('https://esm.sh/acorn@8.15.0/es2022/acorn.mjs');
+
+			assert.equal(rootRel, path.join('esm.sh', '$acorn@8.15.0'));
+			assert.equal(subRel, path.join('esm.sh', 'acorn@8.15.0', 'es2022', '$acorn.mjs'));
+
+			const rootFile = writeToCacheSync('https://esm.sh/acorn@8.15.0', 'export * from "/acorn@8.15.0/es2022/acorn.mjs";', {}, testCacheDir);
+			const subFile = writeToCacheSync('https://esm.sh/acorn@8.15.0/es2022/acorn.mjs', 'export const Parser = {};', {}, testCacheDir);
+
+			assert.equal(fs.existsSync(rootFile), true);
+			assert.equal(fs.existsSync(subFile), true);
 		});
 	});
 
