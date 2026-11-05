@@ -62,7 +62,7 @@ export function registerWebloadBunPlugin (customConfig = null) {
 				const remapped = resolveImportMap(target, importer, importMap, config.configBaseUrl);
 
 				if (remapped) {
-					target = remapped;
+					target = remapped.replace(/^file:\/\//, '');
 				}
 
 				// Check if target is a remote HTTP/HTTPS URL

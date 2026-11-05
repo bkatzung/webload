@@ -1,13 +1,13 @@
 {
   "name": "@bkatzung/webload",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Seamless URL module loading and caching for Node.js and Bun with CSP-like security and WICG import maps",
   "type": "module",
   "main": "./src/index.js",
   "bin": {
-    "wicnode": "./bin/wicnode",
-    "wicbun": "./bin/wicbun",
-    "wicutil": "./bin/wicutil"
+    "wicnode": "bin/wicnode",
+    "wicbun": "bin/wicbun",
+    "wicutil": "bin/wicutil"
   },
   "exports": {
     ".": "./src/index.js",
@@ -36,7 +36,7 @@
   },
   "homepage": "https://github.com/bkatzung/webload#readme",
   "scripts": {
-    "test": "node --test test/**/*.test.js"
+    "test": "node --test \"test/**/*.test.js\""
   },
   "keywords": [
     "esm",
@@ -48,7 +48,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.15.0 <23.0.0 || >=23.5.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6"

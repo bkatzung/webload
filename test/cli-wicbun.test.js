@@ -105,7 +105,8 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 			testConfigPath,
 			JSON.stringify({
 				imports: {
-					'@hello': `http://127.0.0.1:${serverPort}/hello.js`
+					'@hello': `http://127.0.0.1:${serverPort}/hello.js`,
+					'dot/': './'
 				},
 				'script-src': ['http://127.0.0.1:*', 'http://localhost:*']
 			}, null, '\t')
@@ -149,6 +150,24 @@ describe('CLI: wicbun (Bun URL Import Runner)', function () {
 
 		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
 		assert.match(result.stdout, /HELLO_MODULE_EXECUTED/);
+	});
+
+	it('should resolve and execute a local file entry-point via import map prefix', { skip: skipReason }, function () {
+		const localScriptPath = path.join(testTmpDir, 'local.js');
+		fs.writeFileSync(
+			localScriptPath,
+			`
+				console.log('LOCAL_PREFIX_EXECUTED');
+			`
+		);
+
+		const result = spawnSync(wicbunBin, ['--config', testConfigPath, 'dot/local.js'], {
+			encoding: 'utf8',
+			env: { ...process.env, WEBLOAD_CACHE_DIR: path.join(testTmpDir, 'cache' + ++cacheCount) }
+		});
+
+		assert.equal(result.status, 0, `Bun process failed:\n${result.stderr}\n${result.stdout}`);
+		assert.match(result.stdout, /LOCAL_PREFIX_EXECUTED/);
 	});
 
 	it('should execute a remote entry point directly when it is the primary module', { skip: skipReason }, function () {
