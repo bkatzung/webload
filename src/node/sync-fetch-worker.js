@@ -24,7 +24,7 @@ if (parentPort) {
 		try {
 			const res = await fetch(url, {
 				headers: {
-					'User-Agent': 'WebLoad/0.3.0 (Node.js)'
+					'User-Agent': 'WebLoad/0.4.0 (Node.js)'
 				},
 				redirect: 'follow'
 			});
