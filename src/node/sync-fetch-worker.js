@@ -65,7 +65,7 @@ if (parentPort) {
 			while (true) {
 				const res = await fetch(currentUrl, {
 					headers: {
-						'User-Agent': 'WebLoad/0.4.0 (Node.js)'
+						'User-Agent': 'WebLoad/0.5.0 (Node.js)'
 					},
 					redirect: 'manual',
 					signal
