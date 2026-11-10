@@ -1,7 +1,8 @@
 /**
  * WebLoad Bun Plugin Integration
  * Intercepts HTTP/HTTPS URLs and import-map remapped specifiers in Bun runtime.
- * Separates Resolution (onResolve) from Loading (onLoad).
+ * Handles redirection security, relative resolution against canonical URL,
+ * and metadata-first cache resolution.
  */
 
 import { plugin } from 'bun';
@@ -12,6 +13,12 @@ import { isCached, readFromCacheSync } from '../cache.js';
 import { fetchSync } from '../node/sync-fetch.js';
 
 let activeConfig = null;
+
+/**
+ * In-memory map from initial/intermediate requested URL to canonical final response URL.
+ * @type {Map<string, string>}
+ */
+export const canonicalUrlMap = new Map();
 
 /**
  * Gets or loads active configuration.
@@ -31,6 +38,60 @@ export function getConfig () {
  */
 export function setConfig (cfg) {
 	activeConfig = cfg;
+}
+
+/**
+ * Resolves module source by following cached redirects or fetching over network.
+ * @param {string} initialUrl
+ * @param {Object} config
+ * @returns {{ content: string, finalUrl: string }}
+ */
+export function resolveModuleSource (initialUrl, config) {
+	let currentUrl = initialUrl;
+	const maxHops = 20;
+	let hopCount = 0;
+	let content = null;
+	let finalUrl = initialUrl;
+
+	while (true) {
+		// Validate current hop against active CSP rules
+		validateScriptSrc(currentUrl, config.scriptSrc);
+
+		if (isCached(currentUrl, config.cacheDir)) {
+			const cached = readFromCacheSync(currentUrl, config.cacheDir);
+			if (cached?.isRedirect) {
+				hopCount++;
+				if (hopCount > maxHops) {
+					throw new Error(`Too many redirects (maximum of ${maxHops} exceeded) for ${initialUrl}`);
+				}
+				const nextUrl = new URL(cached.location, currentUrl).href;
+				currentUrl = nextUrl;
+				continue;
+			} else if (cached?.code !== null && cached?.code !== undefined) {
+				content = cached.code;
+				finalUrl = currentUrl;
+				break;
+			}
+		}
+
+		// Cache miss or terminal target missing from cache -> fetch from network
+		const fetchResult = fetchSync(currentUrl, {
+			cacheDir: config.cacheDir,
+			scriptSrc: config.scriptSrc,
+			timeout: config.timeout
+		});
+
+		content = fetchResult.content;
+		finalUrl = fetchResult.finalUrl || currentUrl;
+		break;
+	}
+
+	canonicalUrlMap.set(initialUrl, finalUrl);
+	if (finalUrl !== initialUrl) {
+		canonicalUrlMap.set(finalUrl, finalUrl);
+	}
+
+	return { content, finalUrl };
 }
 
 /**
@@ -54,8 +115,9 @@ export function registerWebloadBunPlugin (customConfig = null) {
 
 			build.onResolve({ filter: /.*/ }, function (args) {
 				const specifier = args.path;
-				const webMain = specifier === 'WEBLOAD:MAIN';
-				const importer = args.importer?.replace(/^_http_:/, '') || null;
+				const rawImporter = args.importer?.replace(/^_http_:/, '') || null;
+				const importer = (rawImporter && canonicalUrlMap.get(rawImporter)) || rawImporter;
+
 				// Resolve the original, unmodified entry point if sentinel detected, or specifier otherwise
 				let target = (specifier === 'WEBLOAD:MAIN') ? process.env.WEBLOAD_MAIN : specifier;
 
@@ -76,7 +138,7 @@ export function registerWebloadBunPlugin (customConfig = null) {
 				const fileTarget = /^\.{0,2}\//.test(target);
 
 				// Resolve relative file paths to absolute URLs when parent URL is http(s)
-				if (/^https?:\/\//i.test(importer)) {
+				if (importer && /^https?:\/\//i.test(importer)) {
 					if (fileTarget) {
 						const resolvedUrl = new URL(target, importer).href;
 
@@ -91,33 +153,16 @@ export function registerWebloadBunPlugin (customConfig = null) {
 					return {
 						path: target,
 						namespace: 'file'
-					}
+					};
 				}
 			});
 
 			build.onLoad({ filter: /.*/, namespace: '_http_' }, function (args) {
 				const url = args.path;
+				const { content } = resolveModuleSource(url, config);
 
-				// 1. Security validation
-				validateScriptSrc(url, config.scriptSrc);
-
-				// 2. Cache lookup and cache-miss fetch
-				const cacheDir = config.cacheDir;
-				let contents;
-
-				if (isCached(url, cacheDir)) {
-					const cached = readFromCacheSync(url, cacheDir);
-
-					contents = cached?.code;
-				} else {
-					const fetchResult = fetchSync(url, { cacheDir });
-
-					contents = fetchResult.content;
-				}
-
-				// 3. Return module source
 				return {
-					contents,
+					contents: content,
 					loader: 'js'
 				};
 			});

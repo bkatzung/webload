@@ -1,5 +1,7 @@
 /**
  * WebLoad Node.js Module Hooks (resolve & load)
+ * Handles redirection security, relative resolution against canonical URL,
+ * and metadata-first cache resolution.
  */
 
 import fs from 'node:fs';
@@ -11,6 +13,13 @@ import { isCached, getCachePath, readFromCacheSync } from '../cache.js';
 import { fetchSync } from './sync-fetch.js';
 
 let activeConfig = null;
+
+/**
+ * In-memory map from initial/intermediate requested URL to canonical final response URL.
+ * Used for resolving relative imports (e.g. ./utils.js) against the redirected base URL.
+ * @type {Map<string, string>}
+ */
+export const canonicalUrlMap = new Map();
 
 /**
  * Gets or loads active configuration.
@@ -33,6 +42,60 @@ export function setConfig (cfg) {
 }
 
 /**
+ * Resolves module source by following cached redirects or fetching over network.
+ * @param {string} initialUrl
+ * @param {Object} config
+ * @returns {{ content: string, finalUrl: string }}
+ */
+export function resolveModuleSource (initialUrl, config) {
+	let currentUrl = initialUrl;
+	const maxHops = 20;
+	let hopCount = 0;
+	let content = null;
+	let finalUrl = initialUrl;
+
+	while (true) {
+		// Validate current hop against active CSP rules
+		validateScriptSrc(currentUrl, config.scriptSrc);
+
+		if (isCached(currentUrl, config.cacheDir)) {
+			const cached = readFromCacheSync(currentUrl, config.cacheDir);
+			if (cached?.isRedirect) {
+				hopCount++;
+				if (hopCount > maxHops) {
+					throw new Error(`Too many redirects (maximum of ${maxHops} exceeded) for ${initialUrl}`);
+				}
+				const nextUrl = new URL(cached.location, currentUrl).href;
+				currentUrl = nextUrl;
+				continue;
+			} else if (cached?.code !== null && cached?.code !== undefined) {
+				content = cached.code;
+				finalUrl = currentUrl;
+				break;
+			}
+		}
+
+		// Cache miss or terminal target missing from cache -> fetch from network
+		const fetchResult = fetchSync(currentUrl, {
+			cacheDir: config.cacheDir,
+			scriptSrc: config.scriptSrc,
+			timeout: config.timeout
+		});
+
+		content = fetchResult.content;
+		finalUrl = fetchResult.finalUrl || currentUrl;
+		break;
+	}
+
+	canonicalUrlMap.set(initialUrl, finalUrl);
+	if (finalUrl !== initialUrl) {
+		canonicalUrlMap.set(finalUrl, finalUrl);
+	}
+
+	return { content, finalUrl };
+}
+
+/**
  * Node.js ESM resolve hook.
  * Intercepts HTTP/HTTPS URLs and import-map mapped specifiers.
  * Resolves relative file paths to absolute URLs when parent URL is http(s).
@@ -43,7 +106,8 @@ export function setConfig (cfg) {
  */
 export function resolve (specifier, context, nextResolve) {
 	const config = getConfig();
-	const parentURL = context?.parentURL || null;
+	const rawParentURL = context?.parentURL || null;
+	const parentURL = (rawParentURL && canonicalUrlMap.get(rawParentURL)) || rawParentURL;
 
 	// Resolve unmodified original entry point if sentinel detected, or specifier otherwise
 	let target = (!parentURL && specifier.endsWith('/WEBLOAD:MAIN')) ? process.env.WEBLOAD_MAIN : specifier;
@@ -91,28 +155,12 @@ export function resolve (specifier, context, nextResolve) {
 export function load (url, context, nextLoad) {
 	if (/^https?:\/\//i.test(url)) {
 		const config = getConfig();
+		const { content, finalUrl } = resolveModuleSource(url, config);
 
-		// 1. Check allowed URL (security check)
-		validateScriptSrc(url, config.scriptSrc);
-
-		// 2. Handle cache misses
-		const cacheDir = config.cacheDir;
-		let content;
-
-		if (isCached(url, cacheDir)) {
-			const cached = readFromCacheSync(url, cacheDir);
-
-			content = cached?.code;
-		} else {
-			const fetchResult = fetchSync(url, { cacheDir });
-
-			content = fetchResult.content;
-		}
-
-		// 3. Return cache file contents
 		return {
 			format: 'module',
 			source: content,
+			responseURL: finalUrl,
 			shortCircuit: true
 		};
 	}

@@ -88,29 +88,45 @@ export function getCachePath (targetUrl, cacheDir = getCacheDir()) {
 }
 
 /**
- * Checks if a URL is already present in cache.
+ * Checks if a URL is already present in cache and not expired.
+ * Inspects .meta.json first to support cached redirects and expiration tracking.
  * @param {string | URL} targetUrl
  * @param {string} [cacheDir]
  * @returns {boolean}
  */
 export function isCached (targetUrl, cacheDir = getCacheDir()) {
 	const filePath = getCachePath(targetUrl, cacheDir);
+	const metaPath = `${filePath}.meta.json`;
+
+	if (fs.existsSync(metaPath)) {
+		try {
+			const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+			if (meta?.expiresAt) {
+				const expiresTime = new Date(meta.expiresAt).getTime();
+				if (!Number.isNaN(expiresTime) && Date.now() > expiresTime) {
+					return false; // Expired entry -> cache miss
+				}
+			}
+			if (meta?.isRedirect === true || typeof meta?.location === 'string') {
+				return true; // Redirect entry without content file
+			}
+		} catch {
+			// ignore corrupt meta and fall back to checking primary content file
+		}
+	}
+
 	return fs.existsSync(filePath);
 }
 
 /**
  * Reads cached module content and metadata.
+ * Inspects .meta.json first to handle expiration, redirects, and primary files.
  * @param {string | URL} targetUrl
  * @param {string} [cacheDir]
- * @returns {{ code: string, meta: Object | null } | null}
+ * @returns {{ isRedirect?: boolean, location?: string, code?: string | null, meta: Object | null, filePath: string } | null}
  */
 export function readFromCacheSync (targetUrl, cacheDir = getCacheDir()) {
 	const filePath = getCachePath(targetUrl, cacheDir);
-	if (!fs.existsSync(filePath)) {
-		return null;
-	}
-
-	const code = fs.readFileSync(filePath, 'utf8');
 	const metaPath = `${filePath}.meta.json`;
 	let meta = null;
 
@@ -118,11 +134,39 @@ export function readFromCacheSync (targetUrl, cacheDir = getCacheDir()) {
 		try {
 			meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
 		} catch {
-			// ignore corrupt meta
+			meta = null;
 		}
 	}
 
-	return { code, meta, filePath };
+	if (meta?.expiresAt) {
+		const expiresTime = new Date(meta.expiresAt).getTime();
+		if (!Number.isNaN(expiresTime) && Date.now() > expiresTime) {
+			return null; // Expired entry -> cache miss
+		}
+	}
+
+	if (meta?.isRedirect === true || typeof meta?.location === 'string') {
+		return {
+			isRedirect: true,
+			location: meta.location,
+			code: null,
+			meta,
+			filePath
+		};
+	}
+
+	if (!fs.existsSync(filePath)) {
+		return null;
+	}
+
+	const code = fs.readFileSync(filePath, 'utf8');
+
+	return {
+		isRedirect: false,
+		code,
+		meta,
+		filePath
+	};
 }
 
 /**
@@ -144,11 +188,12 @@ export function ensureModulePackageJsonSync (dirPath) {
 /**
  * Writes module content and metadata to cache atomically.
  * Synchronous version for Node.js synchronous loader hook.
+ * Supports writing redirect-only entries when content is null/undefined.
  * @param {string | URL} targetUrl
- * @param {string | Buffer} content
+ * @param {string | Buffer | null} content
  * @param {Object} [metaOptions]
  * @param {string} [cacheDir]
- * @returns {string} Absolute path to written cached file
+ * @returns {string} Absolute path to written cached file or metadata
  */
 export function writeToCacheSync (targetUrl, content, metaOptions = {}, cacheDir = getCacheDir()) {
 	const urlStr = typeof targetUrl === 'string' ? targetUrl : targetUrl.href;
@@ -158,24 +203,30 @@ export function writeToCacheSync (targetUrl, content, metaOptions = {}, cacheDir
 	// Ensure target directory exists
 	fs.mkdirSync(targetDir, { recursive: true });
 
-	// Ensure per-directory package.json with {"type": "module"}
-	// ensureModulePackageJsonSync(targetDir);
+	// Write primary content file if content is provided
+	if (content !== null && content !== undefined) {
+		const tempFilename = `.tmp.${crypto.randomUUID()}${path.extname(finalPath)}`;
+		const tempPath = path.join(targetDir, tempFilename);
 
-	// Atomic write using unique temporary file
-	const tempFilename = `.tmp.${crypto.randomUUID()}${path.extname(finalPath)}`;
-	const tempPath = path.join(targetDir, tempFilename);
-
-	fs.writeFileSync(tempPath, content);
-	fs.renameSync(tempPath, finalPath);
+		fs.writeFileSync(tempPath, content);
+		fs.renameSync(tempPath, finalPath);
+	}
 
 	// Write metadata file
 	const meta = {
 		url: urlStr,
 		cachedAt: new Date().toISOString(),
-		contentType: metaOptions.contentType || 'application/javascript',
-		size: Buffer.isBuffer(content) ? content.length : Buffer.byteLength(content, 'utf8'),
 		...metaOptions
 	};
+
+	if (content !== null && content !== undefined) {
+		if (!meta.contentType) {
+			meta.contentType = metaOptions.contentType || 'application/javascript';
+		}
+		if (meta.size === undefined) {
+			meta.size = Buffer.isBuffer(content) ? content.length : Buffer.byteLength(content, 'utf8');
+		}
+	}
 
 	const metaTempPath = path.join(targetDir, `.tmp.${crypto.randomUUID()}.meta.json`);
 	const metaFinalPath = `${finalPath}.meta.json`;

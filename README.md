@@ -104,3 +104,44 @@ bun -r @bkatzung/webload/bun ./index.ts
 ## License
 
 [MIT](LICENSE)
+
+---
+
+## FAQ
+
+### Why Use It?
+
+- **No-build and web-first projects**: Author standard web-compatible ESM with zero bundling or transpile steps.
+- **Zero-`node_modules` automation**: Create portable, self-contained CI/CD tools and single-file scripts without local dependency directories.
+- **Write-once/run-anywhere**: Share identical code across browsers, Node.js, Bun, and edge runtimes (e.g. transpiled Mesgjs modules).
+- **Secure dynamic plugin architectures**: Load remote plugins and middleware at runtime with deterministic CSP `script-src` allowlists.
+- **Live schema & contract distribution**: Import shared data schemas or client models directly from internal HTTP endpoints without publishing npm packages.
+- **Engines with late or non-standard Node support**: Uniform module resolution across diverse JavaScript runtimes (e.g. Deno, Ende).
+
+### Are `cache-control`, `expires`, And/Or `pragma` Headers Supported?
+
+- `cache-control`: yes, partially
+  - The `max-age` directive is supported
+  - Revalidation is not supported
+  - `no-cache`, `no-store`, `private`, and `must-revalidate` will prevent content caching
+- `expires`: not supported
+- `pragma`: not supported
+
+---
+
+## References
+
+WebLoad was primarily inspired by the following modules and specifications:
+
+- [@node-loader/http](https://github.com/node-loader/node-loader-http)
+- [@node-loader/import-maps](https://github.com/node-loader/import-maps)
+- [RangerMauve webrun](https://github.com/RangerMauve/webrun)
+- [unjs/env-runner](https://github.com/unjs/env-runner)
+- [WICG Import Maps Specification](https://wicg.github.io/import-maps/)
+
+---
+
+## Credits
+
+- Thanks to reddit user [its_jsec](https://reddit.com/u/its_jsec) for feedback, especially regarding security and timeout-handling.
+
