@@ -10,10 +10,11 @@ WebLoad brings browser-grade and Deno-like URL imports to **Node.js** and **Bun*
 
 - **Direct URL Imports**: Import directly from CDNs (e.g. `esm.sh`, `unpkg.com`) or any remote HTTPS endpoint using standard ES module syntax (`import "https://..."` and `await import("https://...")`).
 -  **WICG Import Maps**: Remap bare specifiers and configure scoped module aliases with standard `imports` and `scopes`.
--  **CSP-Like `script-src` Security**: Default-deny security model prevents arbitrary remote code execution by enforcing configurable domain and wildcard allowlists.
-- **Atomic Local Disk Cache**: Downloaded modules are stored atomically in `~/.cache/webload`, enabling fast startup, offline execution, and race-free concurrent execution.
+-  **CSP-Like `script-src` Security**: Default-deny security model prevents arbitrary remote code execution by enforcing configurable domain and wildcard allowlists (see [Security Guide](docs/security.md)).
+-  **Trust-On-First-Use (TOFU) Integrity**: Cryptographic Subresource Integrity (SRI) hashes automatically lock immutable semver paths on first retrieval to block content mutation or tampered CDN refreshes.
+- **Atomic Local Disk Cache**: Downloaded modules and metadata are stored atomically in `~/.cache/webload`, enabling fast startup, offline execution, and race-free concurrent execution.
 - **Zero-Config CLI Runners**: Dedicated [`wicnode`](docs/wicnode.md) and [`wicbun`](docs/wicbun.md) binaries run local scripts and remote URL entrypoints directly.
-- **Cache Management Utility**: Inspect, evict, and purge cached assets with [`wicutil`](docs/wicutil.md).
+- **Cache Management Utility**: Preload, inspect, evict, and purge cached assets with [`wicutil`](docs/wicutil.md).
 
 ---
 
@@ -77,7 +78,7 @@ wicbun ./index.js
 | `wicbun` | Bun runtime runner with WebLoad plugin. | [docs/wicbun.md](docs/wicbun.md) |
 | `wicutil` | Cache inspection and management utility. | [docs/wicutil.md](docs/wicutil.md) |
 
-For full CLI documentation and workflows, see the [CLI Tools Guide](docs/cli.md).
+For full CLI documentation and workflows, see the [CLI Tools Guide](docs/cli.md). For security architecture and threat models, see the [Security Guide](docs/security.md).
 
 ---
 

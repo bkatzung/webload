@@ -31,9 +31,10 @@ wicutil [options] [command]
 
 | Command | Description |
 |---|---|
-| `--list` | Enumerate all modules currently stored in the cache. Displays the origin URL, local file path, file size (human-readable), and cached ISO 8601 timestamp. |
+| `--list` | Enumerate all modules currently stored in the cache. Displays origin URL, local file path, size, cached timestamp, and SRI integrity hash if locked. |
 | `--clear` | Purge and remove the entire module cache directory. |
 | `--remove <URL...>` | Evict one or more specific modules from the cache by providing their source URLs. |
+| `--preload <URL...>` | Fetch and pre-populate the local cache with remote module URL(s). |
 
 ---
 
@@ -41,6 +42,8 @@ wicutil [options] [command]
 
 | Flag | Description |
 |---|---|
+| `--integrity <hash>` | Expected Subresource Integrity (SRI) hash (e.g. `sha256-<base64>`) when preloading a single URL. |
+| `--force` | Force re-fetching and overwrite existing cache entries and integrity locks. |
 | `--config <path>` | Load a specific `webload.json` configuration file to resolve custom `cacheDir` settings. |
 | `--cache-dir <path>` | Explicitly target a custom cache directory instead of the default location. |
 | `-h`, `--help` | Display the CLI help message and exit. |
@@ -91,7 +94,17 @@ Example output:
 [wicutil] Cache cleared successfully: /home/user/.cache/webload
 ```
 
-### 4. Manage a Custom Cache Directory
+### 4. Preload Remote Modules into Cache
+
+```bash
+# Preload multiple URLs with default TOFU integrity locking
+wicutil --preload https://esm.sh/lodash-es@4.17.21 https://esm.sh/canvas-confetti@1.9.4
+
+# Preload single URL with verified Subresource Integrity (SRI)
+wicutil --preload https://esm.sh/lodash-es@4.17.21 --integrity sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
+```
+
+### 5. Manage a Custom Cache Directory
 
 ```bash
 # Using explicit --cache-dir

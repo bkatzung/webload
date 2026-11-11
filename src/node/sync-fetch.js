@@ -43,6 +43,8 @@ export function getWorker () {
  * @param {number} [options.timeout=30000]
  * @param {string[]} [options.scriptSrc]
  * @param {string} [options.cacheDir]
+ * @param {string} [options.integrity]
+ * @param {boolean} [options.force]
  * @returns {{ content: string, filePath: string | null, meta: Object, finalUrl: string }}
  */
 export function fetchSync (targetUrl, options = {}) {
@@ -180,7 +182,9 @@ export function fetchSync (targetUrl, options = {}) {
 				contentType: meta.contentType,
 				isRedirect: false,
 				statusCode: meta.status,
-				expiresAt: meta.expiresAt
+				expiresAt: meta.expiresAt,
+				integrity: options.integrity,
+				force: options.force
 			},
 			options.cacheDir
 		);

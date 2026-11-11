@@ -1,6 +1,68 @@
 /**
- * WebLoad Security Subsystem: CSP-like `script-src` Allowlist Validator
+ * WebLoad Security Subsystem: CSP-like `script-src` Allowlist Validator & SRI Integrity
  */
+
+import crypto from 'node:crypto';
+
+export const SEMVER_PATH_REGEX = /\d+\.\d+\.\d+/;
+
+/**
+ * Custom error class for Subresource Integrity verification failures.
+ */
+export class WebloadIntegrityError extends Error {
+	constructor (targetUrl, expectedIntegrity, actualIntegrity) {
+		const message = `Integrity check failed for '${targetUrl}'. Expected '${expectedIntegrity}', got '${actualIntegrity}'.`;
+		super(message);
+		this.name = 'WebloadIntegrityError';
+		this.targetUrl = targetUrl;
+		this.expectedIntegrity = expectedIntegrity;
+		this.actualIntegrity = actualIntegrity;
+	}
+}
+
+/**
+ * Checks if a target URL or path contains a semver-like pattern.
+ * @param {string | URL} targetUrl
+ * @returns {boolean}
+ */
+export function isSemverPath (targetUrl) {
+	if (!targetUrl) return false;
+	const pathname = typeof targetUrl === 'string'
+		? (targetUrl.includes('://') ? new URL(targetUrl).pathname : targetUrl)
+		: targetUrl.pathname;
+	return SEMVER_PATH_REGEX.test(pathname);
+}
+
+/**
+ * Computes SRI integrity hash string using Node/Bun crypto.
+ * @param {string | Buffer | Uint8Array} content
+ * @param {string} [algorithm='sha256']
+ * @returns {string} e.g. "sha256-..."
+ */
+export function computeIntegrityHash (content, algorithm = 'sha256') {
+	const algo = algorithm.toLowerCase().replace('-', '');
+	const hash = crypto.createHash(algo).update(content).digest('base64');
+	return `${algo}-${hash}`;
+}
+
+/**
+ * Validates content against an expected SRI integrity string.
+ * @param {string | Buffer | Uint8Array} content
+ * @param {string} expectedIntegrity
+ * @returns {boolean}
+ */
+export function verifyIntegrity (content, expectedIntegrity) {
+	if (!expectedIntegrity || typeof expectedIntegrity !== 'string') {
+		return false;
+	}
+	const dashIdx = expectedIntegrity.indexOf('-');
+	if (dashIdx === -1) {
+		return false;
+	}
+	const algorithm = expectedIntegrity.slice(0, dashIdx);
+	const actual = computeIntegrityHash(content, algorithm);
+	return actual === expectedIntegrity;
+}
 
 export class WebloadSecurityError extends TypeError {
 	/**

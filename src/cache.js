@@ -6,6 +6,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { getCacheDir } from './config.js';
+import {
+	isSemverPath,
+	computeIntegrityHash,
+	verifyIntegrity,
+	WebloadIntegrityError
+} from './security.js';
 
 /**
  * Sanitizes a string for safe filesystem path segments.
@@ -199,25 +205,60 @@ export function writeToCacheSync (targetUrl, content, metaOptions = {}, cacheDir
 	const urlStr = typeof targetUrl === 'string' ? targetUrl : targetUrl.href;
 	const finalPath = getCachePath(urlStr, cacheDir);
 	const targetDir = path.dirname(finalPath);
+	const metaFinalPath = `${finalPath}.meta.json`;
+	const isForced = metaOptions.force === true;
+
+	// Read existing metadata if present for TOFU/persisted integrity verification
+	let existingMeta = null;
+	if (fs.existsSync(metaFinalPath)) {
+		try {
+			existingMeta = JSON.parse(fs.readFileSync(metaFinalPath, 'utf8'));
+		} catch {
+			existingMeta = null;
+		}
+	}
+
+	let expectedIntegrity = metaOptions.integrity || null;
+	if (!expectedIntegrity && !isForced && existingMeta?.integrity) {
+		expectedIntegrity = existingMeta.integrity;
+	}
+
+	// If content is provided and expected integrity is present, verify integrity before staging
+	if (content !== null && content !== undefined && expectedIntegrity) {
+		if (!verifyIntegrity(content, expectedIntegrity)) {
+			const algo = expectedIntegrity.split('-')[0] || 'sha256';
+			const actualIntegrity = computeIntegrityHash(content, algo);
+			console.error(
+				`[webload:security] Integrity Violation: Integrity check failed for '${urlStr}'. Expected '${expectedIntegrity}', computed '${actualIntegrity}'.`
+			);
+			throw new WebloadIntegrityError(urlStr, expectedIntegrity, actualIntegrity);
+		}
+	}
 
 	// Ensure target directory exists
 	fs.mkdirSync(targetDir, { recursive: true });
 
-	// Write primary content file if content is provided
-	if (content !== null && content !== undefined) {
-		const tempFilename = `.tmp.${crypto.randomUUID()}${path.extname(finalPath)}`;
-		const tempPath = path.join(targetDir, tempFilename);
-
-		fs.writeFileSync(tempPath, content);
-		fs.renameSync(tempPath, finalPath);
+	// Determine integrity to persist:
+	// 1. Explicit metaOptions.integrity (for semver and non-semver URLs)
+	// 2. Existing integrity from previous write (if not forcing a reset)
+	// 3. Or compute sha256 TOFU hash if semver path (or force is true) and content is provided
+	let integrityToStore = metaOptions.integrity || (!isForced ? existingMeta?.integrity : null) || null;
+	if (!integrityToStore && (content !== null && content !== undefined)) {
+		if (isSemverPath(urlStr) || isForced) {
+			integrityToStore = computeIntegrityHash(content, 'sha256');
+		}
 	}
 
-	// Write metadata file
+	// Prepare metadata object
 	const meta = {
 		url: urlStr,
 		cachedAt: new Date().toISOString(),
 		...metaOptions
 	};
+
+	if (integrityToStore) {
+		meta.integrity = integrityToStore;
+	}
 
 	if (content !== null && content !== undefined) {
 		if (!meta.contentType) {
@@ -228,14 +269,36 @@ export function writeToCacheSync (targetUrl, content, metaOptions = {}, cacheDir
 		}
 	}
 
-	const metaTempPath = path.join(targetDir, `.tmp.${crypto.randomUUID()}.meta.json`);
-	const metaFinalPath = `${finalPath}.meta.json`;
+	const tempId = crypto.randomUUID();
+	const metaTempPath = path.join(targetDir, `.tmp.${tempId}.meta.json`);
+	const codeTempPath = (content !== null && content !== undefined)
+		? path.join(targetDir, `.tmp.${tempId}${path.extname(finalPath)}`)
+		: null;
 
 	try {
+		// Stage metadata to temp file
 		fs.writeFileSync(metaTempPath, JSON.stringify(meta, null, '\t'), 'utf8');
+
+		// Stage primary content to temp file if present
+		if (codeTempPath && content !== null && content !== undefined) {
+			fs.writeFileSync(codeTempPath, content);
+		}
+
+		// Commit metadata first (FATAL on failure)
 		fs.renameSync(metaTempPath, metaFinalPath);
-	} catch {
-		// Non-fatal if metadata fails
+
+		// Commit primary content file second (FATAL on failure)
+		if (codeTempPath) {
+			fs.renameSync(codeTempPath, finalPath);
+		}
+	} catch (err) {
+		if (fs.existsSync(metaTempPath)) {
+			try { fs.unlinkSync(metaTempPath); } catch {}
+		}
+		if (codeTempPath && fs.existsSync(codeTempPath)) {
+			try { fs.unlinkSync(codeTempPath); } catch {}
+		}
+		throw err;
 	}
 
 	return finalPath;
@@ -302,6 +365,7 @@ export function listCache (cacheDir = getCacheDir()) {
 				let url = null;
 				let cachedAt = null;
 				let size = 0;
+				let integrity = null;
 
 				const metaPath = `${fullPath}.meta.json`;
 				if (fs.existsSync(metaPath)) {
@@ -310,6 +374,7 @@ export function listCache (cacheDir = getCacheDir()) {
 						url = meta.url;
 						cachedAt = meta.cachedAt;
 						size = meta.size;
+						integrity = meta.integrity || null;
 					} catch {
 						// fallback
 					}
@@ -335,7 +400,8 @@ export function listCache (cacheDir = getCacheDir()) {
 					url,
 					filePath: fullPath,
 					cachedAt,
-					size
+					size,
+					integrity
 				});
 			}
 		}
