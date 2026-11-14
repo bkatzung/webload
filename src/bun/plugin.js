@@ -115,7 +115,16 @@ export function registerWebloadBunPlugin (customConfig = null) {
 
 			build.onResolve({ filter: /.*/ }, function (args) {
 				const specifier = args.path;
-				const rawImporter = args.importer?.replace(/^_http_:/, '') || null;
+				const match = specifier.match(/^\/?((?:bun|node):[^?]+)/);
+
+				// Return "clean" bun and node module paths
+				if (match) {
+					return {
+						path: match[1]
+					};
+				}
+
+				const rawImporter = args.importer?.replace(/^\/?_http_:/, '') || null;
 				const importer = (rawImporter && canonicalUrlMap.get(rawImporter)) || rawImporter;
 
 				// Resolve the original, unmodified entry point if sentinel detected, or specifier otherwise
